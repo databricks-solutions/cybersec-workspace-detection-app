@@ -1,0 +1,29 @@
+app_friendly_name: databricks workspace detection app
+app_name: databricks_workspace_detection_app
+author: derek.king
+version: 1.0.0
+release_notes: Initial release
+description: The databricks detection app is a collection of searches against the
+  system.access.audit table (for unity catalog enabled accounts). Searches may be
+  used to report to a detection or alerts table, or simply used to emit dataframes
+  for adhoc analysis.
+app_content_types:
+- detection
+requirements:
+  features: []
+  platform:
+  - classic
+  - serverless
+installation: No specific installation is required to run notebooks. Simply add the
+  applicable notebooks as workflows after amending the start and end times for detection
+  searches.
+configuration: Detection searches rely on access to the audit table, and execution
+  using workflows. The detections are expected to be ran in batch mode. Ensure the
+  trigger schedule matches the lookback period to ensure full coverage, and avoid
+  duplicate events on subsequent runs.
+logo: metadata/logo.png
+screenshots: []
+release_date: <release_date>
+submitted_at: <submitted_at>
+tags: []
+user_email: derek.king@databricks.com

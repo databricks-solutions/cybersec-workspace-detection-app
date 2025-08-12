@@ -1,0 +1,378 @@
+app: databricks_workspace_detection_app
+app_friendly_name: databricks workspace detection app
+app_name: databricks_workspace_detection_app
+author: derek.king
+version: 1.0.0
+release_notes: Initial release
+description: The databricks detection app is a collection of searches against the
+  system.access.audit table (for unity catalog enabled accounts). Searches may be
+  used to report to a detection or alerts table, or simply used to emit dataframes
+  for adhoc analysis.
+app_content_types:
+- detection
+requirements:
+  platform:
+  - classic
+  - serverless
+installation: No specific installation is required to run notebooks. Simply add the
+  applicable notebooks as workflows after amending the start and end times for detection
+  searches.
+configuration: Detection searches rely on access to the audit table, and execution
+  using workflows. The detections are expected to be ran in batch mode. Ensure the
+  trigger schedule matches the lookback period to ensure full coverage, and avoid
+  duplicate events on subsequent runs.
+logo: metadata/logo.png
+release_date: <release_date>
+submitted_at: <submitted_at>
+user_email: derek.king@databricks.com
+notebooks:
+- path: base/detections/user_account_deleted.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: User Account Deleted
+      description: 'Detects user account deletions initiated through the accounts
+        service. # MAGIC '
+      objective: 'Monitor user deletions to detect potential insider threats or unauthorized
+        administrative actions # MAGIC that could be used to erase accounts and disrupt
+        auditing or accountability. # MAGIC '
+    version: 1.0.0
+- path: base/detections/sso_config_changed.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: SSO Configuration Changed
+      description: 'Detects creation or update of single sign-on (SSO) configuration
+        settings. # MAGIC '
+      objective: 'Monitor for changes to SSO configuration to detect unauthorized
+        identity provider tampering, # MAGIC which could allow attackers to redirect
+        authentication flows or weaken enterprise access controls. # MAGIC '
+    version: 1.0.0
+- path: base/detections/attempted_logon_from_denied_ip.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Attempted Logon from Denied IP
+      description: 'Detects blocked login attempts from IP addresses denied by workspace
+        access control policies. # MAGIC '
+      objective: 'Identify logon attempts from explicitly denied IPs that bypass known
+        service agents and telemetry paths, # MAGIC which may indicate unauthorized
+        scanning activity, policy testing, or brute-force attempts from untrusted
+        networks. # MAGIC '
+    version: 1.0.0
+- path: base/detections/access_token_created.py
+  dscc:
+    author: root
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Access Token Created
+      description: Detects access tokens created from unknown IPs or user agents with
+        a non-zero lifetime.
+      objective: 'Identify potentially suspicious access token creation events by
+        filtering for: the `generateDbToken` action within the `accounts` service,
+        tokens created outside of known IP address and user agent baselines, and tokens
+        with a measurable lifespan (i.e., not ephemeral). This helps surface anomalous
+        authentication behavior that may signify credential abuse, script-based automation,
+        or unauthorized access attempts. # MAGIC '
+    version: 1.0.0
+- path: base/detections/non_sso_login_detected.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Non-SSO Login Detected
+      description: 'Detects successful user logins that bypass SSO-based authentication
+        methods. # MAGIC '
+      objective: 'Identify authentication events that do not use the approved browser-based
+        SAML SSO method, # MAGIC which may signal use of service credentials, misconfigured
+        identity settings, or potential account compromise. # MAGIC '
+    version: 1.0.0
+- path: base/detections/spike_in_table_admin_activity.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Spikes in Admin Activity
+      description: 'Detects abnormal increases in unique admin-level queries executed
+        by users. # MAGIC '
+      objective: "Identify spikes in administrative command usage by calculating deviations\
+        \ from a user\u2019s average query volume,\nhelping detect potential misuse\
+        \ of privileges, compromised accounts, or scripted attacks.\n"
+    version: 1.0.0
+- path: base/detections/group_created.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Group Created
+      description: 'Detects the creation of user groups within the accounts service.
+        # MAGIC '
+      objective: 'Track group creation events to detect unauthorized role or permission
+        group provisioning, # MAGIC which could indicate privilege escalation or lateral
+        movement preparation by a threat actor. # MAGIC '
+    version: 1.0.0
+- path: base/detections/session_hijacking_multi_device.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Session Hijack - Multi-Session Multi-Device
+      description: 'Detects rapid user session reuse across different IP addresses
+        or user agents. # MAGIC '
+      objective: 'Identify potential session hijacking by flagging logins that switch
+        between IPs or devices within a short timeframe, # MAGIC which may indicate
+        credential theft, account compromise, or abuse of persistent sessions. # MAGIC '
+    version: 1.0.0
+- path: base/detections/user_role_modified.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: User Role Modified
+      description: 'Detects changes to user roles or administrative group membership.
+        # MAGIC '
+      objective: 'Track modifications to user roles or elevation to administrative
+        groups to identify potential privilege escalation, # MAGIC unauthorized access
+        provisioning, or insider threat activity. # MAGIC '
+    version: 1.0.0
+- path: base/detections/mfa_key_deleted.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: MFA Key Deleted
+      description: 'Detects deletion of multi-factor authentication keys from user
+        accounts. # MAGIC '
+      objective: 'Monitor for MFA key deletion events to detect potential weakening
+        of account protection mechanisms, # MAGIC which may indicate malicious tampering,
+        user compromise, or unauthorized configuration changes. # MAGIC '
+    version: 1.0.0
+- path: base/detections/principal_added_to_group.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Principal Added to Group
+      description: 'Detects the addition of a user or service principal to a group.
+        # MAGIC '
+      objective: 'Monitor group membership assignments to detect unauthorized privilege
+        escalation or role provisioning, # MAGIC which may signal insider misuse or
+        preparatory steps in a broader attack. # MAGIC '
+    version: 1.0.0
+- path: base/detections/group_deleted.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Group Deleted
+      description: 'Detects the deletion of user or role groups through the accounts
+        service. # MAGIC '
+      objective: 'Monitor group deletions to detect unauthorized dismantling of access
+        control structures, # MAGIC which could indicate privilege abuse, insider
+        threats, or attempts to erase evidence of prior access. # MAGIC '
+    version: 1.0.0
+- path: base/detections/session_hijacking_frequent_logins.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Session Hijack - High Session Count
+      description: 'Detects a high volume of login events from different public IPs
+        and user agents in a short time window. # MAGIC '
+      objective: 'Identify burst login activity that may indicate session hijacking
+        or automated attempts to reuse stolen credentials, # MAGIC by tracking users
+        logging in from multiple IPs with unusual frequency over a short duration.
+        # MAGIC '
+    version: 1.0.0
+- path: base/detections/principal_removed_from_group.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Principal Removed from Group
+      description: 'Detects the removal of a user or service principal from a group.
+        # MAGIC '
+      objective: 'Monitor group membership changes to detect unauthorized removal
+        of users or service principals from access groups, # MAGIC which may indicate
+        privilege manipulation or attempts to disrupt access controls and auditing.
+        # MAGIC '
+    version: 1.0.0
+- path: base/detections/session_hijacking_session_count.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Session Hijack - Session Count
+      description: 'Detects user sessions reused across multiple public IPs or devices
+        within a short timeframe. # MAGIC '
+      objective: 'Identify suspicious reuse of authenticated sessions by tracking
+        access patterns that involve multiple # MAGIC distinct public IP addresses
+        or user agents within a 24-hour period, indicating potential session hijacking
+        or credential sharing. # MAGIC '
+    version: 1.0.0
+- path: base/detections/databricks_employee_logon.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Verbose Audit Disabled
+      description: 'Detects successful GENIE_AUTH logins that occurred without verbose
+        auditing at the workspace level. # MAGIC '
+      objective: 'Identify successful authentication events from Databricks employees
+        to ensure compliance with policies. # MAGIC '
+    version: 1.0.0
+- path: base/detections/mfa_key_added.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: MFA Key Added
+      description: 'Detects the addition of multi-factor authentication keys to user
+        accounts. # MAGIC '
+      objective: 'Monitor MFA key enrollment activity to detect security posture changes
+        or unauthorized configuration updates # MAGIC that could indicate account
+        setup by attackers or privilege escalation attempts. # MAGIC '
+    version: 1.0.0
+- path: base/detections/token_scanning_activity.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Token Scanning Activity
+      description: 'Detects anomalously low activity from API tokens across multiple
+        IP addresses.
+
+        '
+      objective: 'Identify suspicious low-usage patterns of personal access tokens
+        (PATs) across varying IPs or user agents,
+
+        which may indicate brute-force attempts to scan for valid tokens or abuse
+        of leaked credentials.
+
+        API connectivity using a token for scanning appears as a single login event,
+        - with no further actions..
+
+        Look for a comparatively low number per src_ip. (1 event is registered per
+        connection attempt, whereas
+
+        a genuine connection (auth''d) will have potentially 100''s of entries)
+
+        '
+    version: 1.0.0
+- path: base/detections/user_account_created.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: User Account Created
+      description: 'Detects new user accounts created via the admin console. # MAGIC '
+      objective: 'Identify user account creation events through the admin console
+        to detect unauthorized provisioning activity, # MAGIC potential insider threats,
+        or abuse of administrative privileges. # MAGIC '
+    version: 1.0.0
+- path: base/detections/verbose_audit_logging_disabled.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Verbose Audit Disabled
+      description: 'Detects when verbose audit logging is explicitly disabled at the
+        workspace configuration level. # MAGIC '
+      objective: 'Monitor configuration changes that disable verbose audit logs to
+        detect attempts at reducing system visibility, # MAGIC which may signal attacker
+        evasion, insider threat activity, or unauthorized configuration tampering.
+        # MAGIC '
+    version: 1.0.0
+- path: base/detections/access_token_deleted.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: Access Token Deleted
+      description: 'Detects access tokens being revoked via the accounts service.
+        # MAGIC '
+      objective: 'Monitor for explicit revocation of access tokens to track potentially
+        suspicious cleanup activity, # MAGIC such as unauthorized credential invalidation
+        or the concealment of prior access. # MAGIC '
+    version: 1.0.0
+- path: base/detections/user_password_changed.py
+  dscc:
+    author: Derek King - Databricks
+    created: '2025-05-09T12:56:50'
+    modified: '2025-05-09T12:56:50'
+    uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+    content_type: detection
+    detection:
+      name: User Password Changed
+      description: 'Detects password change events performed through the accounts
+        service. # MAGIC '
+      objective: 'Track password changes across user accounts to identify potentially
+        unauthorized credential resets, # MAGIC which could indicate account takeover
+        attempts, insider misuse, or lateral movement within the environment. # MAGIC '
+    version: 1.0.0
