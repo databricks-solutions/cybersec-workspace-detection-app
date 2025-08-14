@@ -6,25 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T11:54:55'
+# MAGIC   modified: '2025-06-17T11:54:55'
+# MAGIC   uuid: 60daabdb-eec7-45f1-8d66-9911344140f8
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: SSO Configuration Changed
-# MAGIC     description: 'Detects creation or update of single sign-on (SSO) configuration
+# MAGIC     name: Sso Config Changed
+# MAGIC     description: Detects creation or update of single sign-on (SSO) configuration
 # MAGIC       settings.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor for changes to SSO configuration to detect unauthorized identity
-# MAGIC       provider tampering,
-# MAGIC 
-# MAGIC       which could allow attackers to redirect authentication flows or weaken enterprise
-# MAGIC       access controls.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor for changes to SSO configuration to detect unauthorized identity
+# MAGIC       provider tampering, which could allow attackers to redirect authentication flows
+# MAGIC       or weaken enterprise access controls.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: sso_config_changed
@@ -84,5 +86,9 @@ def sso_config_changed(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-df = sso_config_changed(earliest="2025-03-13", latest="2025-03-14")
-display(df)
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(sso_config_changed(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

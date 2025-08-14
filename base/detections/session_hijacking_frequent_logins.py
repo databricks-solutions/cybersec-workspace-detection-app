@@ -6,25 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:11:43'
+# MAGIC   modified: '2025-06-17T12:11:43'
+# MAGIC   uuid: c1855110-7429-4d41-ab1e-ad23dd3e1ea3
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Session Hijack - High Session Count
-# MAGIC     description: 'Detects a high volume of login events from different public IPs
-# MAGIC       and user agents in a short time window.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify burst login activity that may indicate session hijacking
-# MAGIC       or automated attempts to reuse stolen credentials,
-# MAGIC 
-# MAGIC       by tracking users logging in from multiple IPs with unusual frequency over a
-# MAGIC       short duration.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     name: Session Hijacking Frequent Logins
+# MAGIC     description: Detects a high volume of login events from different public IPs and
+# MAGIC       user agents in a short time window.
+# MAGIC     fidelity: low
+# MAGIC     category: DETECTION
+# MAGIC     objective: Identify burst login activity that may indicate session hijacking or
+# MAGIC       automated attempts to reuse stolen credentials, by tracking users logging in
+# MAGIC       from multiple IPs with unusual frequency over a short duration.
+# MAGIC     false_positives: High -- JSESSION_ID has been redacted in databricks logs
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: session_hijack_high_session_count
@@ -100,5 +102,10 @@ def session_hijack_high_session_count(earliest: str=None, latest: str = None, th
     return df_suspicious_logins
 
 # COMMAND ----------
-
-display(session_hijack_high_session_count(earliest="2025-02-23", latest="2025-02-25", threshold_seconds=60))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(session_hijack_high_session_count(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest"),
+        threshold_seconds=60
+    ))

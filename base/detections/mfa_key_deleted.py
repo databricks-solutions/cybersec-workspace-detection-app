@@ -6,24 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:08:46'
+# MAGIC   modified: '2025-06-17T12:08:46'
+# MAGIC   uuid: b01eda04-95ef-4813-8b81-c2b09d95f22c
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: MFA Key Deleted
-# MAGIC     description: 'Detects deletion of multi-factor authentication keys from user accounts.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor for MFA key deletion events to detect potential weakening
-# MAGIC       of account protection mechanisms,
-# MAGIC 
-# MAGIC       which may indicate malicious tampering, user compromise, or unauthorized configuration
-# MAGIC       changes.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     name: Mfa Key Deleted
+# MAGIC     description: Detects deletion of multi-factor authentication keys from user accounts.
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor for MFA key deletion events to detect potential weakening of
+# MAGIC       account protection mechanisms, which may indicate malicious tampering, user
+# MAGIC       compromise, or unauthorized configuration changes.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: mfa_key_deleted
@@ -79,4 +81,9 @@ def mfa_key_deleted(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(mfa_key_deleted(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(mfa_key_deleted(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

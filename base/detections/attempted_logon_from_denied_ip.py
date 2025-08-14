@@ -6,25 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T11:57:56'
+# MAGIC   modified: '2025-06-17T11:57:56'
+# MAGIC   uuid: 5e7e72b8-5174-447f-970d-3ba5772ca8e9
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Attempted Logon from Denied IP
-# MAGIC     description: 'Detects blocked login attempts from IP addresses denied by workspace
+# MAGIC     name: Attempted Logon From Denied Ip
+# MAGIC     description: Detects blocked login attempts from IP addresses denied by workspace
 # MAGIC       access control policies.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify logon attempts from explicitly denied IPs that bypass known
-# MAGIC       service agents and telemetry paths,
-# MAGIC 
-# MAGIC       which may indicate unauthorized scanning activity, policy testing, or brute-force
-# MAGIC       attempts from untrusted networks.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Identify logon attempts from explicitly denied IPs that bypass known
+# MAGIC       service agents and telemetry paths, which may indicate unauthorized scanning
+# MAGIC       activity, policy testing, or brute-force attempts from untrusted networks.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: attempted_logon_from_denied_ip
@@ -55,7 +57,7 @@
 # COMMAND ----------
 
 @detect(output=Output.asDataFrame)
-def attempted_logon_from_denied_ip(earliest:str = None, latest: str = None, ignore_tokens: bool = False):
+def attempted_logon_from_denied_ip(earliest:str = None, latest: str = None, ignore_tokens: bool = True):
     from pyspark.sql.functions import (col, current_date, date_sub, to_date, current_timestamp, 
                                        expr, unix_timestamp, round, from_unixtime, when, to_timestamp)
 
@@ -111,5 +113,9 @@ def attempted_logon_from_denied_ip(earliest:str = None, latest: str = None, igno
 
 # COMMAND ----------
 
-df = attempted_logon_from_denied_ip(earliest="2025-03-13", latest="2025-03-14", ignore_tokens=True)
-display(df)
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(attempted_logon_from_denied_ip(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

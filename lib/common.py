@@ -412,3 +412,59 @@ def detect(func=None, *, output=None, columns=None, arg=None):
 
         return result
     return wrapper
+
+from datetime import datetime, timedelta, timezone
+
+def get_time_range_from_widgets(default_hours: int = 24):
+    from datetime import datetime, timedelta, timezone
+
+    now_utc = datetime.now(timezone.utc)
+    default_latest = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+    default_earliest = (now_utc - timedelta(hours=default_hours)).strftime("%Y-%m-%d %H:%M:%S")
+
+    dbutils.widgets.text("earliest", default_earliest)
+    dbutils.widgets.text("latest", default_latest)
+
+    earliest = dbutils.widgets.get("earliest")
+    latest = dbutils.widgets.get("latest")
+
+    print(f"✅ Using time range: earliest = {earliest}, latest = {latest}")
+    return earliest, latest
+
+def run_all_detections(
+    workspace_dir: str,
+    earliest: str,
+    latest: str,
+    notebook_filter: str = None
+):
+    import re
+    from pathlib import PurePosixPath
+
+    print(f"Scanning Workspace notebooks in: {workspace_dir}")
+
+    try:
+        notebooks = dbutils.fs.ls(f"file:{workspace_dir}")
+    except Exception as e:
+        print(f"Failed to list: {e}")
+        return
+
+    notebook_paths = [
+        f"{workspace_dir}/{f.name}" for f in notebooks
+        if f.name.endswith(".py") or f.name.endswith(".ipynb") or f.name.endswith(".dbc")
+    ]
+
+    if notebook_filter:
+        pattern = re.compile(notebook_filter)
+        notebook_paths = [n for n in notebook_paths if pattern.search(n)]
+
+    for full_path in notebook_paths:
+        run_path = str(PurePosixPath(full_path).with_suffix(""))
+
+        try:
+            dbutils.notebook.run(run_path, arguments={
+                "earliest": earliest,
+                "latest": latest
+            })
+
+        except Exception as e:
+            print(f"Failed to run {run_path}: {e}")

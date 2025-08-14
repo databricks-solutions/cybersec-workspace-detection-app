@@ -6,22 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:15:52'
+# MAGIC   modified: '2025-06-17T12:15:52'
+# MAGIC   uuid: a1491bb6-ee58-47f3-b64c-9358948ca4d4
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Verbose Audit Disabled
-# MAGIC     description: 'Detects successful GENIE_AUTH logins that occurred without verbose
+# MAGIC     name: Databricks Employee Logon
+# MAGIC     description: Detects successful GENIE_AUTH logins that occurred without verbose
 # MAGIC       auditing at the workspace level.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify successful authentication events from Databricks employees
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Identify successful authentication events from Databricks employees
 # MAGIC       to ensure compliance with policies.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: databricks_employee_logon
@@ -84,5 +88,9 @@ def databricks_employee_logon(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-df = databricks_employee_logon(earliest="2025-03-15", latest="2025-03-19")
-display(df)
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(databricks_employee_logon(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

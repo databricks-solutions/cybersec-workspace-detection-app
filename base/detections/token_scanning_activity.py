@@ -5,22 +5,31 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:18:01'
+# MAGIC   modified: '2025-06-17T12:18:01'
+# MAGIC   uuid: 565ad252-a499-4c20-88b4-2c23b6a2bca2
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: Token Scanning Activity
-# MAGIC     description: |
-# MAGIC       Detects anomalously low activity from API tokens across multiple IP addresses.
-# MAGIC     objective: |
-# MAGIC       Identify suspicious low-usage patterns of personal access tokens (PATs) across varying IPs or user agents,
-# MAGIC       which may indicate brute-force attempts to scan for valid tokens or abuse of leaked credentials.
-# MAGIC       API connectivity using a token for scanning appears as a single login event, - with no further actions.. 
-# MAGIC       Look for a comparatively low number per src_ip. (1 event is registered per connection attempt, whereas 
-# MAGIC       a genuine connection (auth'd) will have potentially 100's of entries)
-# MAGIC     taxonomy: []
+# MAGIC     description: Detects anomalously low activity from API tokens across multiple
+# MAGIC       IP addresses.
+# MAGIC     fidelity: low
+# MAGIC     category: DETECTION
+# MAGIC     objective: Identify suspicious low-usage patterns of personal access tokens (PATs)
+# MAGIC       across varying IPs or user agents, which may indicate brute-force attempts to
+# MAGIC       scan for valid tokens or abuse of leaked credentials. API connectivity using
+# MAGIC       a token for scanning appears as a single login event, - with no further actions..
+# MAGIC       Look for a comparatively low number per src_ip. (1 event is registered per connection
+# MAGIC       attempt, whereas a genuine connection (auth'd) will have potentially 100's of
+# MAGIC       entries)
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: token_scanning_activity
@@ -113,5 +122,10 @@ def token_scanning_activity(earliest: str, latest: str, threshold: int = 0):
 
 # COMMAND ----------
 
-df = token_scanning_activity(earliest="2025-01-01", latest="2025-03-01", threshold=0.5)
-display(df)
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(token_scanning_activity(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest"),
+        threshold=0.5
+    ))

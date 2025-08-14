@@ -6,23 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:07:36'
+# MAGIC   modified: '2025-06-17T12:07:36'
+# MAGIC   uuid: 456f1e21-ba8b-4321-9954-18647d317988
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: User Role Modified
-# MAGIC     description: 'Detects changes to user roles or administrative group membership.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Track modifications to user roles or elevation to administrative groups
-# MAGIC       to identify potential privilege escalation,
-# MAGIC 
-# MAGIC       unauthorized access provisioning, or insider threat activity.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     description: Detects changes to user roles or administrative group membership.
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Track modifications to user roles or elevation to administrative groups
+# MAGIC       to identify potential privilege escalation, unauthorized access provisioning,
+# MAGIC       or insider threat activity.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: user_role_modified
@@ -64,7 +67,12 @@ def user_role_modified(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(user_role_modified(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(user_role_modified(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))
 
-# COMMAND ----------
+
 

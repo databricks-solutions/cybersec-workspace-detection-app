@@ -6,25 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:01:22'
+# MAGIC   modified: '2025-06-17T12:01:22'
+# MAGIC   uuid: 9c9a83ff-472a-408b-ae7c-148637267699
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Non-SSO Login Detected
-# MAGIC     description: 'Detects successful user logins that bypass SSO-based authentication
+# MAGIC     name: Non Sso Login Detected
+# MAGIC     description: Detects successful user logins that bypass SSO-based authentication
 # MAGIC       methods.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify authentication events that do not use the approved browser-based
-# MAGIC       SAML SSO method,
-# MAGIC 
-# MAGIC       which may signal use of service credentials, misconfigured identity settings,
-# MAGIC       or potential account compromise.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Identify authentication events that do not use the approved browser-based
+# MAGIC       SAML SSO method, which may signal use of service credentials, misconfigured
+# MAGIC       identity settings, or potential account compromise.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: non_sso_login_detected
@@ -88,4 +90,9 @@ def non_sso_login_detected(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(non_sso_login_detected(earliest="2025-03-15", latest="2025-03-19"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(non_sso_login_detected(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

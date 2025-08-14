@@ -6,23 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T11:49:23'
+# MAGIC   modified: '2025-06-17T11:49:23'
+# MAGIC   uuid: a9dd1fc1-21e6-475a-979f-88a62f62904f
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: User Account Deleted
-# MAGIC     description: 'Detects user account deletions initiated through the accounts service.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor user deletions to detect potential insider threats or unauthorized
-# MAGIC       administrative actions
-# MAGIC 
-# MAGIC       that could be used to erase accounts and disrupt auditing or accountability.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     description: Detects user account deletions initiated through the accounts service.
+# MAGIC     fidelity: medium
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor user deletions to detect potential insider threats or unauthorized
+# MAGIC       administrative actions that could be used to erase accounts and disrupt auditing
+# MAGIC       or accountability.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: user_account_deleted
@@ -79,8 +82,12 @@ def user_account_deleted(earliest:str = None, latest: str = None):
     return df_filtered
 
 # COMMAND ----------
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(user_account_deleted(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))
 
-display(user_account_deleted(earliest="2024-09-01", latest="2025-02-25"))
 
-# COMMAND ----------
 

@@ -6,24 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:16:59'
+# MAGIC   modified: '2025-06-17T12:16:59'
+# MAGIC   uuid: 49f8236d-72e6-4678-bb96-8423b4ca953f
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: MFA Key Added
-# MAGIC     description: 'Detects the addition of multi-factor authentication keys to user
+# MAGIC     name: Mfa Key Added
+# MAGIC     description: Detects the addition of multi-factor authentication keys to user
 # MAGIC       accounts.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor MFA key enrollment activity to detect security posture changes
-# MAGIC       or unauthorized configuration updates
-# MAGIC 
-# MAGIC       that could indicate account setup by attackers or privilege escalation attempts.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: low
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor MFA key enrollment activity to detect security posture changes
+# MAGIC       or unauthorized configuration updates that could indicate account setup by attackers
+# MAGIC       or privilege escalation attempts.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: mfa_key_added
@@ -77,4 +80,9 @@ def mfa_key_added(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(mfa_key_added(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(mfa_key_added(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

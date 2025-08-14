@@ -6,25 +6,28 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:05:00'
+# MAGIC   modified: '2025-06-17T12:05:00'
+# MAGIC   uuid: bd7b94f0-40fa-42c5-b7a0-ef6b72e96ee6
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Session Hijack - Multi-Session Multi-Device
-# MAGIC     description: 'Detects rapid user session reuse across different IP addresses or
-# MAGIC       user agents.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify potential session hijacking by flagging logins that switch
-# MAGIC       between IPs or devices within a short timeframe,
-# MAGIC 
-# MAGIC       which may indicate credential theft, account compromise, or abuse of persistent
-# MAGIC       sessions.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     name: Session Hijacking Multi Device
+# MAGIC     description: Detects rapid user session reuse across different IP addresses or
+# MAGIC       user agents
+# MAGIC     fidelity: low
+# MAGIC     category: DETECTION
+# MAGIC     objective: Identify potential session hijacking by flagging logins that switch
+# MAGIC       between IPs or devices within a short timeframe, which may indicate credential
+# MAGIC       theft, account compromise, or abuse of persistent sessions.
+# MAGIC     false_positives: databricks redacts the JSESSION_ID field making this detection
+# MAGIC       noisy, and prone to errors
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: session_hijack_multi_session_multi_device
@@ -99,4 +102,9 @@ def session_hijack_multi_session_multi_device(earliest: str, latest: str = None,
 
 # COMMAND ----------
 
-display(session_hijack_multi_session_multi_device(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(session_hijack_multi_session_multi_device(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

@@ -6,25 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:10:41'
+# MAGIC   modified: '2025-06-17T12:10:41'
+# MAGIC   uuid: 3229fd85-6d16-42d9-a765-64136e9f1435
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: Group Deleted
-# MAGIC     description: 'Detects the deletion of user or role groups through the accounts
+# MAGIC     description: Detects the deletion of user or role groups through the accounts
 # MAGIC       service.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor group deletions to detect unauthorized dismantling of access
-# MAGIC       control structures,
-# MAGIC 
-# MAGIC       which could indicate privilege abuse, insider threats, or attempts to erase
-# MAGIC       evidence of prior access.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor group deletions to detect unauthorized dismantling of access
+# MAGIC       control structures, which could indicate privilege abuse, insider threats, or
+# MAGIC       attempts to erase evidence of prior access.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: group_deleted
@@ -84,4 +86,9 @@ def group_deleted(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(group_deleted(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(group_deleted(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

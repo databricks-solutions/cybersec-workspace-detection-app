@@ -6,23 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:09:49'
+# MAGIC   modified: '2025-06-17T12:09:49'
+# MAGIC   uuid: ae8eeedf-aa3d-4611-ad8d-0deed1bbd255
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Principal Added to Group
-# MAGIC     description: 'Detects the addition of a user or service principal to a group.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor group membership assignments to detect unauthorized privilege
-# MAGIC       escalation or role provisioning,
-# MAGIC 
-# MAGIC       which may signal insider misuse or preparatory steps in a broader attack.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     name: Principal Added To Group
+# MAGIC     description: Detects the addition of a user or service principal to a group.
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor group membership assignments to detect unauthorized privilege
+# MAGIC       escalation or role provisioning, which may signal insider misuse or preparatory
+# MAGIC       steps in a broader attack.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: principal_added_to_group
@@ -82,4 +85,9 @@ def principal_added_to_group(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(principal_added_to_group(earliest="2025-03-17 22:00:00", latest="2025-03-18"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(principal_added_to_group(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

@@ -6,25 +6,28 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:14:26'
+# MAGIC   modified: '2025-06-17T12:14:26'
+# MAGIC   uuid: 53e42333-ee45-4772-83b2-74699c581748
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Session Hijack - Session Count
-# MAGIC     description: 'Detects user sessions reused across multiple public IPs or devices
+# MAGIC     name: Session Hijacking Session Count
+# MAGIC     description: Detects user sessions reused across multiple public IPs or devices
 # MAGIC       within a short timeframe.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify suspicious reuse of authenticated sessions by tracking access
-# MAGIC       patterns that involve multiple
-# MAGIC 
-# MAGIC       distinct public IP addresses or user agents within a 24-hour period, indicating
-# MAGIC       potential session hijacking or credential sharing.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: low
+# MAGIC     category: DETECTION
+# MAGIC     objective: Identify suspicious reuse of authenticated sessions by tracking access
+# MAGIC       patterns that involve multiple distinct public IP addresses or user agents within
+# MAGIC       a 24-hour period, indicating potential session hijacking or credential sharing.
+# MAGIC     false_positives: High. JSESSION_ID needed for reliable tracking is redacted in
+# MAGIC       the databricks audit logs
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: session_hijack_session_count
@@ -103,4 +106,9 @@ def session_hijack_session_count(earliest: str=None, latest: str = None):
 
 # COMMAND ----------
 
-display(session_hijack_session_count(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(session_hijack_session_count(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))
