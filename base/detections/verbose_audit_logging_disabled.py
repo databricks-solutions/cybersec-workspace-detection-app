@@ -6,25 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:20:38'
+# MAGIC   modified: '2025-06-17T12:20:38'
+# MAGIC   uuid: acfbe7ce-8108-4d6b-816b-f7963ec2bae1
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Verbose Audit Disabled
-# MAGIC     description: 'Detects when verbose audit logging is explicitly disabled at the
+# MAGIC     name: Verbose Audit Logging Disabled
+# MAGIC     description: Detects when verbose audit logging is explicitly disabled at the
 # MAGIC       workspace configuration level.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor configuration changes that disable verbose audit logs to detect
-# MAGIC       attempts at reducing system visibility,
-# MAGIC 
-# MAGIC       which may signal attacker evasion, insider threat activity, or unauthorized
-# MAGIC       configuration tampering.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor configuration changes that disable verbose audit logs to detect
+# MAGIC       attempts at reducing system visibility, which may signal attacker evasion, insider
+# MAGIC       threat activity, or unauthorized configuration tampering.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: verbose_audit_disabled
@@ -66,16 +68,16 @@ def verbose_audit_disabled(earliest:str = None, latest: str = None):
     df_filtered = df.filter(
         (col("service_name") == "workspace") &
         (col("action_name").isin("workspaceConfEdit")) &
-        (col("request_params").getItem("workspace_conf_keys") == "enableVerboseAuditLogs") &
-        (col("request_params").getItem("workspace_conf_values") == "false") &
+        (col("request_params").getItem("workspaceConfKeys") == "enableVerboseAuditLogs") &
+        (col("request_params").getItem("workspaceConfValues") == "false") &
         (col("event_time") >= earliest) & (col("event_time") <= latest)
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
         col("action_name").alias("ACTION"),
         when(col("response.status_code") == 200, "Success").otherwise("Failure").alias("STATUS"),
         col("user_identity.email").alias("SRC_USER"),
-        col("request_params").getItem("workspace_conf_keys").alias("CONF_KEY"),
-        when(col("request_params").getItem("workspace_conf_values") == "false", "Disabled").otherwise("Enabled").alias("CONF_VALUE"),
+        col("request_params").getItem("workspaceConfKeys").alias("CONF_KEY"),
+        when(col("request_params").getItem("workspaceConfValues") == "false", "Disabled").otherwise("Enabled").alias("CONF_VALUE"),
         col("audit_level").alias("AUDIT_LEVEL"),
         col("source_ip_address").alias("SRC_IP"),
         col("user_agent").alias("USER_AGENT")
@@ -85,4 +87,9 @@ def verbose_audit_disabled(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(verbose_audit_disabled(earliest="2025-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(verbose_audit_disabled(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

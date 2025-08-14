@@ -6,23 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:19:35'
+# MAGIC   modified: '2025-06-17T12:19:35'
+# MAGIC   uuid: 4883ddd6-e357-40a9-a45d-98ab07c81856
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: User Account Created
-# MAGIC     description: 'Detects new user accounts created via the admin console.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Identify user account creation events through the admin console to
-# MAGIC       detect unauthorized provisioning activity,
-# MAGIC 
-# MAGIC       potential insider threats, or abuse of administrative privileges.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     description: Detects new user accounts created via the admin console.
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Identify user account creation events through the admin console to
+# MAGIC       detect unauthorized provisioning activity, potential insider threats, or abuse
+# MAGIC       of administrative privileges.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: user_account_created
@@ -81,5 +84,9 @@ def user_account_created(earliest:str = None, latest: str = None):
     return df_filtered
 
 # COMMAND ----------
-
-display(user_account_created(earliest="2024-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(user_account_created(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

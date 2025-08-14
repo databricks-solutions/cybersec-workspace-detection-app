@@ -6,24 +6,30 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: root
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T11:59:15'
+# MAGIC   modified: '2025-06-17T11:59:15'
+# MAGIC   uuid: ea49708b-50cf-4926-b734-c8acef522744
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: Access Token Created
 # MAGIC     description: Detects access tokens created from unknown IPs or user agents with
 # MAGIC       a non-zero lifetime.
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
 # MAGIC     objective: 'Identify potentially suspicious access token creation events by filtering
 # MAGIC       for: the `generateDbToken` action within the `accounts` service, tokens created
 # MAGIC       outside of known IP address and user agent baselines, and tokens with a measurable
 # MAGIC       lifespan (i.e., not ephemeral). This helps surface anomalous authentication
 # MAGIC       behavior that may signify credential abuse, script-based automation, or unauthorized
-# MAGIC       access attempts.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC       access attempts.'
+# MAGIC     false_positives: unknown
+# MAGIC     severity: high
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: access_token_created
@@ -99,7 +105,12 @@ def access_token_created(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(access_token_created(earliest="2025-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(access_token_created(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))
 
 # COMMAND ----------
 

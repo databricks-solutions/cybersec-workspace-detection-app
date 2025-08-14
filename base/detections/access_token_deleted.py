@@ -6,23 +6,26 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:21:38'
+# MAGIC   modified: '2025-06-17T12:21:38'
+# MAGIC   uuid: 479f8708-b446-4a2a-af32-0c14ee52a5d4
 # MAGIC   content_type: detection
 # MAGIC   detection:
 # MAGIC     name: Access Token Deleted
-# MAGIC     description: 'Detects access tokens being revoked via the accounts service.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: 'Monitor for explicit revocation of access tokens to track potentially
-# MAGIC       suspicious cleanup activity,
-# MAGIC 
-# MAGIC       such as unauthorized credential invalidation or the concealment of prior access.
-# MAGIC 
-# MAGIC       '
-# MAGIC     taxonomy: []
+# MAGIC     description: Detects access tokens being revoked via the accounts service.
+# MAGIC     fidelity: high
+# MAGIC     category: POLICY
+# MAGIC     objective: Monitor for explicit revocation of access tokens to track potentially
+# MAGIC       suspicious cleanup activity, such as unauthorized credential invalidation or
+# MAGIC       the concealment of prior access.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: access_token_deleted
@@ -77,4 +80,9 @@ def access_token_deleted(earliest:str = None, latest: str = None):
 
 # COMMAND ----------
 
-display(access_token_deleted(earliest="2020-01-01", latest="2025-02-25"))
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(access_token_deleted(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest")
+    ))

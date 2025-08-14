@@ -4,7 +4,7 @@ A collection of security detection notebooks for Databricks workspaces that anal
 
 ## Overview
 
-This detection app provides 25+ pre-built security detection notebooks designed for security operations teams to monitor Databricks workspace activities. The detections cover various security scenarios including:
+This detection app provides 30+ pre-built security detection notebooks designed for security operations teams to monitor Databricks workspace activities. The detections cover various security scenarios including:
 
 - **Authentication & Access Control**: Token creation/deletion, MFA changes, SSO configuration changes
 - **User Management**: Account creation/deletion, role modifications, group changes
@@ -14,11 +14,12 @@ This detection app provides 25+ pre-built security detection notebooks designed 
 
 ## Features
 
-- **Coverage**: 25+ detection scenarios covering major security use cases
+- **Coverage**: 30+ detection scenarios covering major security use cases
 - **Production Ready**: Designed for batch execution via Databricks workflows
 - **Configurable**: Customizable time ranges and detection parameters
 - **Audit Table Focus**: Leverages Databricks `system.access.audit` table for comprehensive visibility
 - **Unity Catalog Compatible**: Designed for Unity Catalog enabled accounts
+- **MITRE ATT&CK Mapped**: Many detections include MITRE ATT&CK framework mappings for threat intelligence
 
 ## Detection Categories
 
@@ -49,6 +50,30 @@ This detection app provides 25+ pre-built security detection notebooks designed 
 ### Network & Access Control
 - Attempted Logon from Denied IP
 - Token Scanning Activity Detection
+
+### Data Exfiltration & Movement
+- Potential Data Movement via SQL Queries
+- Potential Data Movement via Workspace Downloads
+- Potential Data Movement via Explicit Credentials
+
+### Configuration & Policy Monitoring
+- High Priority Configuration Changes
+- Workspace-Level Configuration Changes
+- Account-Level Configuration Changes
+
+### Secrets & Credential Management
+- Secret Scanning Activity Detection
+- Admin User Account Changes
+
+## Enhanced Detection Capabilities
+
+The latest version includes advanced detection scenarios that go beyond basic audit monitoring:
+
+- **Data Exfiltration Detection**: Identifies potential data movement attempts using SQL queries, workspace downloads, and explicit credentials
+- **Configuration Tampering**: Monitors for unauthorized changes to security-critical workspace and account configurations
+- **Secret Enumeration**: Detects reconnaissance activities targeting secret scopes and credential harvesting
+- **Admin Privilege Escalation**: Tracks administrative privilege changes and group membership modifications
+- **Comprehensive Coverage**: Integrates both `system.access.audit` and `system.query.history` tables for complete visibility
 
 ## Installation
 

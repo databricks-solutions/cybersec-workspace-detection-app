@@ -6,21 +6,27 @@
 # MAGIC %md
 # MAGIC ```yaml
 # MAGIC dscc:
-# MAGIC   author: Derek King - Databricks
-# MAGIC   created: '2025-05-09T12:56:50'
-# MAGIC   modified: '2025-05-09T12:56:50'
-# MAGIC   uuid: 4e8de7fb-5fbe-424c-99be-22e6efbb5445
+# MAGIC   author: derek.king
+# MAGIC   created: '2025-06-17T12:02:36'
+# MAGIC   modified: '2025-06-17T12:02:36'
+# MAGIC   uuid: 37ae13e6-8e76-4928-98ee-5c303dfc259d
 # MAGIC   content_type: detection
 # MAGIC   detection:
-# MAGIC     name: Spikes in Admin Activity
-# MAGIC     description: 'Detects abnormal increases in unique admin-level queries executed
+# MAGIC     name: Spike In Table Admin Activity
+# MAGIC     description: Detects abnormal increases in unique admin-level queries executed
 # MAGIC       by users.
-# MAGIC 
-# MAGIC       '
-# MAGIC     objective: "Identify spikes in administrative command usage by calculating deviations\
-# MAGIC       \ from a user\u2019s average query volume,\nhelping detect potential misuse\
-# MAGIC       \ of privileges, compromised accounts, or scripted attacks.\n"
-# MAGIC     taxonomy: []
+# MAGIC     fidelity: low
+# MAGIC     category: POLICY
+# MAGIC     objective: Identify spikes in administrative command usage by calculating deviations
+# MAGIC       from a user average query volume, helping detect potential misuse of privileges,
+# MAGIC       compromised accounts, or scripted attacks.
+# MAGIC     false_positives: unknown
+# MAGIC     severity: low
+# MAGIC     taxonomy:
+# MAGIC     - none
+# MAGIC     platform:
+# MAGIC     - databricks
+# MAGIC   version: 1.0.0
 # MAGIC dscc-tests:
 # MAGIC   tests:
 # MAGIC   - function: spikes_in_admin_activity
@@ -143,6 +149,10 @@ def spikes_in_admin_activity(earliest: str, latest: str, threshold: int = 0):
 
 
 # COMMAND ----------
-
-df = spikes_in_admin_activity(earliest="2025-01-01", latest="2025-03-03", threshold=1.5)
-display(df)
+if __name__ == "__main__" or dbutils.widgets.get("earliest"):
+    earliest, latest = get_time_range_from_widgets()
+    display(spikes_in_admin_activity(
+        earliest=dbutils.widgets.get("earliest"),
+        latest=dbutils.widgets.get("latest"),
+        threshold=1.5
+    ))
