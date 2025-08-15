@@ -61,7 +61,7 @@ def session_hijack_multi_session_multi_device(earliest: str, latest: str = None,
     known_ua_regex = "|".join(known_user_agents)
 
     # Load audit logs within the time range
-    df = spark.read.table("system.access.audit") \
+    df = spark.table("system.access.audit") \
         .filter((F.col("event_time") >= earliest) & (F.col("event_time") <= latest)) \
         .filter(F.col("service_name") == "accounts") \
         .filter(F.col("action_name").isin(["login", "tokenLogin", "samlLogin", "jwtLogin"])) \
