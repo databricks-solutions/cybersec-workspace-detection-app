@@ -44,6 +44,7 @@
 
 # COMMAND ----------
 
+@detect(output=Output.asDataFrame)
 def session_hijack_high_session_count(earliest: str=None, latest: str = None, threshold_seconds: int=600, threshold_value: int=2):
     from pyspark.sql import functions as F
     from pyspark.sql.window import Window
@@ -66,7 +67,7 @@ def session_hijack_high_session_count(earliest: str=None, latest: str = None, th
     known_ua_regex = "|".join(known_user_agents)
 
     # Load audit logs within the time range
-    df_logins = spark.read.table("system.access.audit") \
+    df_logins = spark.table("system.access.audit") \
         .filter((F.col("event_time") >= earliest) & (F.col("event_time") <= latest)) \
         .filter(F.col("service_name") == "accounts") \
         .filter(F.col("action_name").isin(["login", "tokenLogin", "samlLogin", "jwtLogin"])) \

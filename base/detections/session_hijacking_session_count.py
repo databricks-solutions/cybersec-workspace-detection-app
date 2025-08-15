@@ -51,6 +51,7 @@
 
 # COMMAND ----------
 
+@detect(output=Output.asDataFrame)
 def session_hijack_session_count(earliest: str=None, latest: str = None):
     from pyspark.sql import functions as F
     earliest = earliest or F.current_timestamp() - F.expr("INTERVAL 24 hours")
@@ -70,7 +71,7 @@ def session_hijack_session_count(earliest: str=None, latest: str = None):
     known_ua_regex = "|".join(known_user_agents)
 
     # Load audit logs within the time range
-    df_sessions = spark.read.table("system.access.audit") \
+    df_sessions = spark.table("system.access.audit") \
         .filter((F.col("event_time") >= earliest) & (F.col("event_time") <= latest)) \
         .filter(F.col("session_id").isNotNull()) \
         .filter(~F.col("source_ip_address").rlike(private_ip_regex)) \
