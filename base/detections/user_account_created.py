@@ -19,10 +19,15 @@
 # MAGIC     objective: Identify user account creation events through the admin console to
 # MAGIC       detect unauthorized provisioning activity, potential insider threats, or abuse
 # MAGIC       of administrative privileges.
-# MAGIC     false_positives: unknown
-# MAGIC     severity: low
+# MAGIC     false_positives: If the account is created by a user whose role requires creating 
+# MAGIC       user accounts, then this is likely a false positive. But account creation is also 
+# MAGIC       a key way to maintain persistence.
+# MAGIC     severity: high
 # MAGIC     taxonomy:
-# MAGIC     - none
+# MAGIC     - MITRE.T1098.Account_Manipulation
+# MAGIC     - MITRE.T1098.001.Account_Manipulation.Create_Account
+# MAGIC     - MITRE.T1078.Valid_Accounts
+# MAGIC     - MITRE.T1078.001.Valid_Accounts.Default_Accounts
 # MAGIC     platform:
 # MAGIC     - databricks
 # MAGIC   version: 1.0.0
