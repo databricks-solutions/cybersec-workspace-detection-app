@@ -7,7 +7,7 @@ A collection of security detection notebooks for Databricks workspaces that anal
 ### What's Inside
 
 This tool provides **31 security detections** organized by urgency and investigation approach:
-- **13 Binary Detections** - High-confidence alerts for immediate response (24-hour default window)
+- **16 Binary Detections** - High-confidence alerts for immediate response (24-hour default window)
 - **18 Behavioral Detections** - Pattern analysis for threat hunting (30-day default window)
 
 ### Three Ways to Use This Tool
@@ -26,7 +26,7 @@ This tool provides **31 security detections** organized by urgency and investiga
 cybersec-workspace-detection-app/
 ├── base/
 │   ├── detections/
-│   │   ├── binary/          # 13 immediate alert detections (24-hour window)
+│   │   ├── binary/          # 16 immediate alert detections (24-hour window)
 │   │   └── behavioral/      # 18 threat hunting detections (30-day window)
 │   └── notebooks/
 │       ├── threat_models/   # 7 threat model notebook generators
@@ -53,7 +53,7 @@ Generate focused investigation notebooks combining multiple detections for speci
 
 | Threat Model | Detections | Risk Description (Source: Databricks SBP) |
 |-------------|-----------|-------------------------------------------|
-| **Account Takeover or Compromise** | 14 detections | Databricks is a general-purpose compute platform that customers can set up to access critical data sources. If credentials belonging to a user were compromised by phishing, brute force, or other methods, an attacker might get access to all of the data accessible by the compromised user from the environment. |
+| **Account Takeover or Compromise** | 17 detections | Databricks is a general-purpose compute platform that customers can set up to access critical data sources. If credentials belonging to a user were compromised by phishing, brute force, or other methods, an attacker might get access to all of the data accessible by the compromised user from the environment. |
 | **Data Exfiltration** | 8 detections | If a malicious user or an attacker is able to log into a customer's environment, they may be able to exfiltrate sensitive data and then store it, sell it, or ransom it. |
 | **Insider Threat** | 14 detections | High-performing engineers and data professionals will generally find the best or fastest way to complete their tasks, but sometimes that may do so in ways that create security impacts to their organizations. One user may think their job would be much easier if they didn't have to deal with security controls, or another might copy some data to simplify sharing of data. |
 | **Supply Chain Attacks** | 3 detections | Historically, supply chain attacks have relied upon injecting malicious code into software libraries. More recently, we have started to see the emergence of AI model and data supply chain attacks, whereby the model, its weights or the data itself is maliciously altered. |
@@ -127,7 +127,7 @@ The notebook will run all detections filtered to the specified user and display 
 
 ## Detection Categories
 
-### Binary Detections (13 Total)
+### Binary Detections (16 Total)
 
 **Purpose**: Immediate alerts for high-confidence security events
 **Time Window**: 24 hours (configurable)
@@ -144,13 +144,16 @@ The notebook will run all detections filtered to the specified user and display 
 - Attempted Logon from Denied IP - `/base/detections/binary/attempted_logon_from_denied_ip.py`
 - Databricks Employee Logon Detection - `/base/detections/binary/databricks_employee_logon.py`
 
-#### Identity & Access Management (6)
+#### Identity & Access Management (9)
 - User Admin Account Changes - `/base/detections/binary/user_admin_account_change.py`
 - User Role Modifications - `/base/detections/binary/user_role_modified.py`
 - User Account Deletion - `/base/detections/binary/user_account_deleted.py`
 - Group Deletion - `/base/detections/binary/group_deleted.py`
 - Principal Removed from Group - `/base/detections/binary/principal_removed_from_group.py`
 - TruffleHog Scan Detected - `/base/detections/binary/trufflehog_scan_detected.py`
+- Account Admin Privileged Role Assignment - `/base/detections/binary/account_admin_privileged_role_assignment.py`
+- Metastore Admin Privilege Granted - `/base/detections/binary/metastore_admin_privilege_granted.py`
+- Workspace Admin Privileged Role Assignment - `/base/detections/binary/workspace_admin_privileged_role_assignment.py`
 
 ### Behavioral Detections (18 Total)
 
