@@ -4,7 +4,7 @@ Complete inventory of all security detections including existing implementations
 
 ## Existing Detections (34 Total)
 
-### Binary Detections (16)
+### Event-based Detections (16)
 
 High-confidence security events requiring immediate attention with 24-hour default time windows.
 
@@ -58,7 +58,7 @@ Pattern analysis over 30-day default time windows for threat hunting and investi
 
 These detections are planned for future implementation based on security requirements and threat landscape evolution.
 
-### Planned Binary Detections
+### Planned Event-based Detections
 
 | Detection Name | Priority | Target Threat Models | Description | Notes |
 |---------------|----------|---------------------|-------------|-------|
@@ -93,31 +93,31 @@ These detections are planned for future implementation based on security require
 ## Detection Coverage by Threat Model
 
 ### Account Takeover or Compromise (17 detections)
-- **Binary (6)**: SSO Config Changed, Attempted Logon from Denied IP, User Admin Account Change, User Role Modified, Account Admin Privileged Role Assignment, Metastore Admin Privilege Granted, Workspace Admin Privileged Role Assignment
+- **Event-based (6)**: SSO Config Changed, Attempted Logon from Denied IP, User Admin Account Change, User Role Modified, Account Admin Privileged Role Assignment, Metastore Admin Privilege Granted, Workspace Admin Privileged Role Assignment
 - **Behavioral (11)**: Non-SSO Login, Session Hijacking (3), Access Token Created/Deleted, MFA Key Added/Deleted, User Password Changed, Principal Added to Group, User Account Created
 
 ### Data Exfiltration (8 detections)
-- **Binary (1)**: TruffleHog Scan Detected
+- **Event-based (1)**: TruffleHog Scan Detected
 - **Behavioral (7)**: Potential Data Movement (3 types), Secret Scanning, Token Scanning, Access Token Created, Spike in Table Admin Activity
 
 ### Insider Threat (17 detections)
-- **Binary (9)**: Configuration Changes (3 types), Verbose Audit Logging Disabled, User Admin Account Change, User Account Deleted, Group Deleted, Principal Removed from Group, Account Admin Privileged Role Assignment, Metastore Admin Privilege Granted, Workspace Admin Privileged Role Assignment
+- **Event-based (9)**: Configuration Changes (3 types), Verbose Audit Logging Disabled, User Admin Account Change, User Account Deleted, Group Deleted, Principal Removed from Group, Account Admin Privileged Role Assignment, Metastore Admin Privilege Granted, Workspace Admin Privileged Role Assignment
 - **Behavioral (8)**: Potential Data Movement (3 types), Spike in Table Admin Activity, Secret Scanning, Access Token Created
 
 ### Supply Chain Attacks (3 detections)
-- **Binary (1)**: TruffleHog Scan Detected
+- **Event-based (1)**: TruffleHog Scan Detected
 - **Behavioral (2)**: Token Scanning, Secret Scanning
 
 ### Potential Compromise of Databricks (6 detections)
-- **Binary (6)**: Databricks Employee Logon, Configuration Changes (Account Level), SSO Config Changed, User Admin Account Change, Account Admin Privileged Role Assignment, Workspace Admin Privileged Role Assignment
+- **Event-based (6)**: Databricks Employee Logon, Configuration Changes (Account Level), SSO Config Changed, User Admin Account Change, Account Admin Privileged Role Assignment, Workspace Admin Privileged Role Assignment
 - **Behavioral (0)**: None
 
 ### Ransomware Attacks (9 detections)
-- **Binary (7)**: Configuration Changes (3 types), User Account Deleted, Group Deleted, Principal Removed from Group, User Role Modified, Verbose Audit Logging Disabled
+- **Event-based (7)**: Configuration Changes (3 types), User Account Deleted, Group Deleted, Principal Removed from Group, User Role Modified, Verbose Audit Logging Disabled
 - **Behavioral (2)**: Spike in Table Admin Activity
 
 ### Resource Abuse (3 detections)
-- **Binary (0)**: None
+- **Event-based (0)**: None
 - **Behavioral (3)**: Spike in Table Admin Activity, User Account Created, Access Token Created
 
 ---
@@ -125,11 +125,11 @@ These detections are planned for future implementation based on security require
 ## Detection Statistics
 
 - **Total Existing Detections**: 34
-  - Binary: 16 (47%)
+  - Event-based: 16 (47%)
   - Behavioral: 18 (53%)
 
 - **Total Planned Detections**: 20
-  - Binary: 6
+  - Event-based: 6
   - Behavioral: 14
 
 - **Severity Distribution (Existing)**:

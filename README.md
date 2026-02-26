@@ -7,7 +7,7 @@ A collection of security detection notebooks for Databricks workspaces that anal
 ### What's Inside
 
 This tool provides **34 security detections** organized by urgency and investigation approach:
-- **16 Binary Detections** - High-confidence alerts for immediate response (24-hour default window)
+- **16 Event-based Detections** - High-confidence alerts for immediate response (24-hour default window)
 - **18 Behavioral Detections** - Pattern analysis for threat hunting (30-day default window)
 
 ### Three Ways to Use This Tool
@@ -26,7 +26,7 @@ This tool provides **34 security detections** organized by urgency and investiga
 cybersec-workspace-detection-app/
 ├── base/
 │   ├── detections/
-│   │   ├── binary/          # 16 immediate alert detections (24-hour window)
+│   │   ├── binary/          # 16 event-based detections (24-hour window)
 │   │   └── behavioral/      # 18 threat hunting detections (30-day window)
 │   └── notebooks/
 │       ├── threat_models/   # 7 threat model notebook generators
@@ -127,7 +127,7 @@ The notebook will run all detections filtered to the specified user and display 
 
 ## Detection Categories
 
-### Binary Detections (16 Total)
+### Event-based Detections (16 Total)
 
 **Purpose**: Immediate alerts for high-confidence security events
 **Time Window**: 24 hours (configurable)
@@ -195,7 +195,7 @@ The notebook will run all detections filtered to the specified user and display 
 
 Each detection notebook can be run independently for targeted analysis.
 
-### Binary Detection Example
+### Event-based Detection Example
 
 High-confidence immediate alert:
 
