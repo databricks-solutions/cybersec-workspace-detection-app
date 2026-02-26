@@ -6,7 +6,7 @@ A collection of security detection notebooks for Databricks workspaces that anal
 
 ### What's Inside
 
-This tool provides **31 security detections** organized by urgency and investigation approach:
+This tool provides **34 security detections** organized by urgency and investigation approach:
 - **16 Binary Detections** - High-confidence alerts for immediate response (24-hour default window)
 - **18 Behavioral Detections** - Pattern analysis for threat hunting (30-day default window)
 

@@ -55,6 +55,9 @@ THREAT_MODEL_MAPPINGS = {
         # Privilege escalation
         "binary/user_admin_account_change",
         "binary/user_role_modified",
+        "binary/account_admin_privileged_role_assignment",
+        "binary/metastore_admin_privilege_granted",
+        "binary/workspace_admin_privileged_role_assignment",
         "behavioral/principal_added_to_group",
         "behavioral/user_account_created"
     ],
@@ -86,6 +89,9 @@ THREAT_MODEL_MAPPINGS = {
         "binary/configuration_changes_high_priority",
         "binary/configuration_changes_account_level",
         "binary/configuration_changes_workspace_level",
+        "binary/account_admin_privileged_role_assignment",
+        "binary/metastore_admin_privilege_granted",
+        "binary/workspace_admin_privileged_role_assignment",
 
         # Audit evasion
         "binary/verbose_audit_logging_disabled",
@@ -115,7 +121,9 @@ THREAT_MODEL_MAPPINGS = {
         # Account-level configuration changes
         "binary/configuration_changes_account_level",
         "binary/sso_config_changed",
-        "binary/user_admin_account_change"
+        "binary/user_admin_account_change",
+        "binary/account_admin_privileged_role_assignment",
+        "binary/workspace_admin_privileged_role_assignment"
     ],
 
     "ransomware": [

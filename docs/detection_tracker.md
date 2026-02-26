@@ -2,9 +2,9 @@
 
 Complete inventory of all security detections including existing implementations and planned additions.
 
-## Existing Detections (31 Total)
+## Existing Detections (34 Total)
 
-### Binary Detections (13)
+### Binary Detections (16)
 
 High-confidence security events requiring immediate attention with 24-hour default time windows.
 
@@ -23,6 +23,9 @@ High-confidence security events requiring immediate attention with 24-hour defau
 | Group Deleted | `/base/detections/binary/group_deleted.py` | insider_threat, ransomware | Medium | Detects group deletions |
 | User Role Modified | `/base/detections/binary/user_role_modified.py` | account_takeover, ransomware | Medium | Monitors user role modifications |
 | Principal Removed from Group | `/base/detections/binary/principal_removed_from_group.py` | insider_threat, ransomware | Medium | Detects when principals are removed from groups |
+| Account Admin Privileged Role Assignment | `/base/detections/binary/account_admin_privileged_role_assignment.py` | account_takeover, insider_threat, databricks_compromise | High | Detects direct account admin privilege grants or additions to account admin groups |
+| Metastore Admin Privilege Granted | `/base/detections/binary/metastore_admin_privilege_granted.py` | account_takeover, insider_threat | High | Detects metastore ownership changes or additions to metastore admin groups |
+| Workspace Admin Privileged Role Assignment | `/base/detections/binary/workspace_admin_privileged_role_assignment.py` | account_takeover, insider_threat, databricks_compromise | High | Detects workspace admin privilege grants or additions to the system admins group |
 
 ### Behavioral Detections (18)
 
@@ -89,24 +92,24 @@ These detections are planned for future implementation based on security require
 
 ## Detection Coverage by Threat Model
 
-### Account Takeover or Compromise (14 detections)
-- **Binary (3)**: SSO Config Changed, Attempted Logon from Denied IP, User Admin Account Change, User Role Modified
+### Account Takeover or Compromise (17 detections)
+- **Binary (6)**: SSO Config Changed, Attempted Logon from Denied IP, User Admin Account Change, User Role Modified, Account Admin Privileged Role Assignment, Metastore Admin Privilege Granted, Workspace Admin Privileged Role Assignment
 - **Behavioral (11)**: Non-SSO Login, Session Hijacking (3), Access Token Created/Deleted, MFA Key Added/Deleted, User Password Changed, Principal Added to Group, User Account Created
 
 ### Data Exfiltration (8 detections)
 - **Binary (1)**: TruffleHog Scan Detected
 - **Behavioral (7)**: Potential Data Movement (3 types), Secret Scanning, Token Scanning, Access Token Created, Spike in Table Admin Activity
 
-### Insider Threat (14 detections)
-- **Binary (6)**: Configuration Changes (3 types), Verbose Audit Logging Disabled, User Admin Account Change, User Account Deleted, Group Deleted, Principal Removed from Group
+### Insider Threat (17 detections)
+- **Binary (9)**: Configuration Changes (3 types), Verbose Audit Logging Disabled, User Admin Account Change, User Account Deleted, Group Deleted, Principal Removed from Group, Account Admin Privileged Role Assignment, Metastore Admin Privilege Granted, Workspace Admin Privileged Role Assignment
 - **Behavioral (8)**: Potential Data Movement (3 types), Spike in Table Admin Activity, Secret Scanning, Access Token Created
 
 ### Supply Chain Attacks (3 detections)
 - **Binary (1)**: TruffleHog Scan Detected
 - **Behavioral (2)**: Token Scanning, Secret Scanning
 
-### Potential Compromise of Databricks (4 detections)
-- **Binary (4)**: Databricks Employee Logon, Configuration Changes (Account Level), SSO Config Changed, User Admin Account Change
+### Potential Compromise of Databricks (6 detections)
+- **Binary (6)**: Databricks Employee Logon, Configuration Changes (Account Level), SSO Config Changed, User Admin Account Change, Account Admin Privileged Role Assignment, Workspace Admin Privileged Role Assignment
 - **Behavioral (0)**: None
 
 ### Ransomware Attacks (9 detections)
@@ -121,22 +124,22 @@ These detections are planned for future implementation based on security require
 
 ## Detection Statistics
 
-- **Total Existing Detections**: 31
-  - Binary: 13 (42%)
-  - Behavioral: 18 (58%)
+- **Total Existing Detections**: 34
+  - Binary: 16 (47%)
+  - Behavioral: 18 (53%)
 
 - **Total Planned Detections**: 20
   - Binary: 6
   - Behavioral: 14
 
 - **Severity Distribution (Existing)**:
-  - High: 14 detections
+  - High: 17 detections
   - Medium: 13 detections
   - Low: 4 detections
 
 - **Most Covered Threat Models**:
-  1. Account Takeover: 14 detections
-  2. Insider Threat: 14 detections
+  1. Account Takeover: 17 detections
+  2. Insider Threat: 17 detections
   3. Ransomware: 9 detections
   4. Data Exfiltration: 8 detections
 
@@ -160,4 +163,4 @@ Some existing "planned" detections from requirements already exist with differen
 
 ---
 
-*Last Updated: 2025-01-29*
+*Last Updated: 2026-02-26*
