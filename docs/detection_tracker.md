@@ -10,22 +10,22 @@ High-confidence security events requiring immediate attention with 24-hour defau
 
 | Detection Name | File Path | Threat Models | Severity | Description |
 |---------------|-----------|---------------|----------|-------------|
-| SSO Config Changed | `/base/detections/binary/sso_config_changed.py` | account_takeover, databricks_compromise | High | Detects changes to SSO configuration settings |
-| TruffleHog Scan Detected | `/base/detections/binary/trufflehog_scan_detected.py` | data_exfiltration, supply_chain | High | Detects TruffleHog scanning tool usage indicating credential scanning |
-| Configuration Changes (Account Level) | `/base/detections/binary/configuration_changes_account_level.py` | insider_threat, databricks_compromise, ransomware | High | Monitors account-level configuration changes |
-| Configuration Changes (High Priority) | `/base/detections/binary/configuration_changes_high_priority.py` | insider_threat, ransomware | High | Detects high-priority configuration modifications |
-| Configuration Changes (Workspace Level) | `/base/detections/binary/configuration_changes_workspace_level.py` | insider_threat, ransomware | High | Monitors workspace-level configuration changes |
-| Verbose Audit Logging Disabled | `/base/detections/binary/verbose_audit_logging_disabled.py` | insider_threat, ransomware | High | Detects when audit logging is disabled (audit evasion) |
-| User Admin Account Change | `/base/detections/binary/user_admin_account_change.py` | account_takeover, insider_threat, databricks_compromise | High | Monitors changes to admin user accounts |
-| Attempted Logon from Denied IP | `/base/detections/binary/attempted_logon_from_denied_ip.py` | account_takeover | Medium | Detects login attempts from IP addresses on deny lists |
-| Databricks Employee Logon | `/base/detections/binary/databricks_employee_logon.py` | databricks_compromise | Medium | Monitors Databricks employee access to customer workspaces |
-| User Account Deleted | `/base/detections/binary/user_account_deleted.py` | insider_threat, ransomware | Medium | Detects user account deletions |
-| Group Deleted | `/base/detections/binary/group_deleted.py` | insider_threat, ransomware | Medium | Detects group deletions |
-| User Role Modified | `/base/detections/binary/user_role_modified.py` | account_takeover, ransomware | Medium | Monitors user role modifications |
-| Principal Removed from Group | `/base/detections/binary/principal_removed_from_group.py` | insider_threat, ransomware | Medium | Detects when principals are removed from groups |
-| Account Admin Privileged Role Assignment | `/base/detections/binary/account_admin_privileged_role_assignment.py` | account_takeover, insider_threat, databricks_compromise | High | Detects direct account admin privilege grants or additions to account admin groups |
-| Metastore Admin Privilege Granted | `/base/detections/binary/metastore_admin_privilege_granted.py` | account_takeover, insider_threat | High | Detects metastore ownership changes or additions to metastore admin groups |
-| Workspace Admin Privileged Role Assignment | `/base/detections/binary/workspace_admin_privileged_role_assignment.py` | account_takeover, insider_threat, databricks_compromise | High | Detects workspace admin privilege grants or additions to the system admins group |
+| SSO Config Changed | `/base/detections/event-based/sso_config_changed.py` | account_takeover, databricks_compromise | High | Detects changes to SSO configuration settings |
+| TruffleHog Scan Detected | `/base/detections/event-based/trufflehog_scan_detected.py` | data_exfiltration, supply_chain | High | Detects TruffleHog scanning tool usage indicating credential scanning |
+| Configuration Changes (Account Level) | `/base/detections/event-based/configuration_changes_account_level.py` | insider_threat, databricks_compromise, ransomware | High | Monitors account-level configuration changes |
+| Configuration Changes (High Priority) | `/base/detections/event-based/configuration_changes_high_priority.py` | insider_threat, ransomware | High | Detects high-priority configuration modifications |
+| Configuration Changes (Workspace Level) | `/base/detections/event-based/configuration_changes_workspace_level.py` | insider_threat, ransomware | High | Monitors workspace-level configuration changes |
+| Verbose Audit Logging Disabled | `/base/detections/event-based/verbose_audit_logging_disabled.py` | insider_threat, ransomware | High | Detects when audit logging is disabled (audit evasion) |
+| User Admin Account Change | `/base/detections/event-based/user_admin_account_change.py` | account_takeover, insider_threat, databricks_compromise | High | Monitors changes to admin user accounts |
+| Attempted Logon from Denied IP | `/base/detections/event-based/attempted_logon_from_denied_ip.py` | account_takeover | Medium | Detects login attempts from IP addresses on deny lists |
+| Databricks Employee Logon | `/base/detections/event-based/databricks_employee_logon.py` | databricks_compromise | Medium | Monitors Databricks employee access to customer workspaces |
+| User Account Deleted | `/base/detections/event-based/user_account_deleted.py` | insider_threat, ransomware | Medium | Detects user account deletions |
+| Group Deleted | `/base/detections/event-based/group_deleted.py` | insider_threat, ransomware | Medium | Detects group deletions |
+| User Role Modified | `/base/detections/event-based/user_role_modified.py` | account_takeover, ransomware | Medium | Monitors user role modifications |
+| Principal Removed from Group | `/base/detections/event-based/principal_removed_from_group.py` | insider_threat, ransomware | Medium | Detects when principals are removed from groups |
+| Account Admin Privileged Role Assignment | `/base/detections/event-based/account_admin_privileged_role_assignment.py` | account_takeover, insider_threat, databricks_compromise | High | Detects direct account admin privilege grants or additions to account admin groups |
+| Metastore Admin Privilege Granted | `/base/detections/event-based/metastore_admin_privilege_granted.py` | account_takeover, insider_threat | High | Detects metastore ownership changes or additions to metastore admin groups |
+| Workspace Admin Privileged Role Assignment | `/base/detections/event-based/workspace_admin_privileged_role_assignment.py` | account_takeover, insider_threat, databricks_compromise | High | Detects workspace admin privilege grants or additions to the system admins group |
 
 ### Behavioral Detections (18)
 
