@@ -132,18 +132,29 @@ def account_admin_privileged_role_assignment(earliest: str = None, latest: str =
         # Resolve one level of nested groups: find any non-user principals
         # (i.e. child groups) that were added to a monitored admin group in
         # audit history, and add them to the filter list.
-        child_group_rows = df.filter(
+        _uuid_pat = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        _email_pat = ".*@.*"
+        _base = (
             (col("service_name") == "accounts") &
             (col("action_name").isin(group_membership_actions)) &
-            (col("request_params.targetGroupName").isin(group_list)) &
+            (col("request_params.targetGroupName").isin(group_list))
+        )
+        child_via_principal = df.filter(
+            _base &
             col("request_params.principal").isNotNull() &
-            (~col("request_params.principal").rlike(".*@.*")) &
-            (~col("request_params.principal").rlike(
-                "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-            ))
-        ).select("request_params.principal").distinct().collect()
+            (~col("request_params.principal").rlike(_email_pat)) &
+            (~col("request_params.principal").rlike(_uuid_pat))
+        ).select(col("request_params.principal").alias("child_group"))
 
-        child_groups = [row["principal"] for row in child_group_rows]
+        child_via_target_user = df.filter(
+            _base &
+            col("request_params.targetUserName").isNotNull() &
+            (~col("request_params.targetUserName").rlike(_email_pat)) &
+            (~col("request_params.targetUserName").rlike(_uuid_pat))
+        ).select(col("request_params.targetUserName").alias("child_group"))
+
+        child_group_rows = child_via_principal.union(child_via_target_user).distinct().collect()
+        child_groups = [row["child_group"] for row in child_group_rows]
         expanded_group_list = list(set(group_list + child_groups))
 
         df_group_additions = df.filter(
@@ -170,11 +181,10 @@ def account_admin_privileged_role_assignment(earliest: str = None, latest: str =
         col("action_name").alias("ACTION"),
         col("source_ip_address").alias("SRC_IP"),
         col("service_name").alias("SERVICE_NAME"),
-        coalesce(
-            col("request_params.target_user_name"),
-            col("request_params.targetUserName"),
-            col("request_params.principal")
-        ).alias("TARGET_PRINCIPAL_NAME"),
+        when(col("request_params.target_user_name").isNotNull(), col("request_params.target_user_name"))
+        .when(col("request_params.targetUserName").isNotNull(), col("request_params.targetUserName"))
+        .when(col("request_params.principal").isNotNull(), col("request_params.principal"))
+        .otherwise(lit(None)).alias("TARGET_PRINCIPAL_NAME"),
         col("request_params.targetUserId").alias("TARGET_USER_ID"),
         col("request_params.endpoint").alias("ENDPOINT"),
         col("request_params.targetGroupName").alias("TARGET_GROUP_NAME"),
