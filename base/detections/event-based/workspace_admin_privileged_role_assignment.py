@@ -69,8 +69,9 @@
 # MAGIC
 # MAGIC | Scenario | Action | Detection Method |
 # MAGIC |----------|--------|------------------|
-# MAGIC | User/SPN granted workspace admin via direct entitlement (auto-adds to admins group) | `setAdmin` or `addAdmin` | Direct audit log query |
+# MAGIC | User/SPN granted workspace admin via direct entitlement | `setAdmin` or `addAdmin` | Direct audit log query |
 # MAGIC | User/SPN added directly to system "admins" group | `addPrincipalToGroup` or `addPrincipalsToGroup` | Monitors fixed system group "admins" |
+# MAGIC | User/SPN added to a child group nested inside "admins" | `addPrincipalToGroup` or `addPrincipalsToGroup` | Transitive child group resolution (one level) |
 # MAGIC
 # MAGIC **Note:** The "admins" group is a fixed system-reserved group in every Databricks workspace that grants workspace admin privileges.
 # MAGIC
@@ -78,11 +79,13 @@
 # MAGIC
 # MAGIC | Scenario | Recommendation |
 # MAGIC |----------|----------------|
+# MAGIC | User/SPN added to deeply nested groups (>1 level) inside "admins" | Current resolution is one level deep; extend child group logic recursively if needed |
 # MAGIC | Historical workspace admin group members before detection deployment | Run initial group membership audit at deployment |
 # MAGIC
 # MAGIC **Important Notes:**
 # MAGIC - This detection monitors both direct admin entitlement assignments AND the fixed "admins" system group
 # MAGIC - Direct admin entitlement assignment automatically adds principals to the "admins" group (both events detected)
+# MAGIC - Child group resolution is one level deep; deeply nested group hierarchies (>1 level) are not covered
 # MAGIC - For complete coverage, supplement with periodic group entitlement audits
 
 # COMMAND ----------
@@ -113,11 +116,26 @@ def workspace_admin_privileged_role_assignment(earliest: str = None, latest: str
         (col("action_name").isin(direct_admin_actions))
     )
 
+    # Resolve one level of nested groups added to the fixed "admins" group
+    child_group_rows = df.filter(
+        (col("service_name") == "accounts") &
+        (col("action_name").isin(group_membership_actions)) &
+        (col("request_params.targetGroupName") == "admins") &
+        col("request_params.principal").isNotNull() &
+        (~col("request_params.principal").rlike(".*@.*")) &
+        (~col("request_params.principal").rlike(
+            "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        ))
+    ).select("request_params.principal").distinct().collect()
+
+    child_groups = [row["principal"] for row in child_group_rows]
+    expanded_admin_groups = list(set(["admins"] + child_groups))
+
     df_group_additions = df.filter(
         (col("event_time").between(earliest, latest)) &
         (col("service_name") == "accounts") &
         (col("action_name").isin(group_membership_actions)) &
-        (col("request_params.targetGroupName") == "admins")
+        (col("request_params.targetGroupName").isin(expanded_admin_groups))
     )
 
     df_combined = df_direct.unionByName(df_group_additions, allowMissingColumns=True)
@@ -135,7 +153,7 @@ def workspace_admin_privileged_role_assignment(earliest: str = None, latest: str
         ).alias("TARGET_PRINCIPAL_NAME"),
         col("request_params.targetUserId").alias("TARGET_USER_ID"),
         col("request_params.endpoint").alias("ENDPOINT"),
-        col("request_params.target_group_name").alias("TARGET_GROUP_NAME"),
+        col("request_params.targetGroupName").alias("TARGET_GROUP_NAME"),
         col("request_params.targetServicePrincipalName").alias("TARGET_SPN_NAME"),
         col("request_params.roles").alias("ROLES_ASSIGNED"),
         col("user_agent").alias("USER_AGENT"),
