@@ -30,13 +30,13 @@ THREAT_MODEL_RISK_DESCRIPTIONS = {
 # COMMAND ----------
 
 # Mappings from threat models to detection file paths (relative to base/detections/)
-# Detection paths use the format "binary/filename" or "behavioral/filename" (without .py extension)
+# Detection paths use the format "event-based/filename" or "behavioral/filename" (without .py extension)
 THREAT_MODEL_MAPPINGS = {
     "account_takeover": [
         # Authentication & credential compromise
         "behavioral/non_sso_login_detected",
-        "binary/attempted_logon_from_denied_ip",
-        "binary/sso_config_changed",
+        "event-based/attempted_logon_from_denied_ip",
+        "event-based/sso_config_changed",
 
         # Token abuse
         "behavioral/access_token_created",
@@ -53,8 +53,11 @@ THREAT_MODEL_MAPPINGS = {
         "behavioral/session_hijacking_session_count",
 
         # Privilege escalation
-        "binary/user_admin_account_change",
-        "binary/user_role_modified",
+        "event-based/user_admin_account_change",
+        "event-based/user_role_modified",
+        "event-based/account_admin_privileged_role_assignment",
+        "event-based/metastore_admin_privilege_granted",
+        "event-based/workspace_admin_privileged_role_assignment",
         "behavioral/principal_added_to_group",
         "behavioral/user_account_created"
     ],
@@ -68,7 +71,7 @@ THREAT_MODEL_MAPPINGS = {
         # Credential/token abuse
         "behavioral/access_token_created",
         "behavioral/secret_scanning_activity",
-        "binary/trufflehog_scan_detected",
+        "event-based/trufflehog_scan_detected",
         "behavioral/token_scanning_activity",
 
         # High data access
@@ -82,18 +85,21 @@ THREAT_MODEL_MAPPINGS = {
         "behavioral/potential_data_movement_workspace_downloads",
 
         # Administrative abuse & privilege escalation
-        "binary/user_admin_account_change",
-        "binary/configuration_changes_high_priority",
-        "binary/configuration_changes_account_level",
-        "binary/configuration_changes_workspace_level",
+        "event-based/user_admin_account_change",
+        "event-based/configuration_changes_high_priority",
+        "event-based/configuration_changes_account_level",
+        "event-based/configuration_changes_workspace_level",
+        "event-based/account_admin_privileged_role_assignment",
+        "event-based/metastore_admin_privilege_granted",
+        "event-based/workspace_admin_privileged_role_assignment",
 
         # Audit evasion
-        "binary/verbose_audit_logging_disabled",
+        "event-based/verbose_audit_logging_disabled",
 
         # Destructive activities
-        "binary/user_account_deleted",
-        "binary/group_deleted",
-        "binary/principal_removed_from_group",
+        "event-based/user_account_deleted",
+        "event-based/group_deleted",
+        "event-based/principal_removed_from_group",
 
         # Suspicious patterns
         "behavioral/spike_in_table_admin_activity",
@@ -103,36 +109,38 @@ THREAT_MODEL_MAPPINGS = {
 
     "supply_chain": [
         # Credential scanning (detecting compromised secrets in code/libraries)
-        "binary/trufflehog_scan_detected",
+        "event-based/trufflehog_scan_detected",
         "behavioral/token_scanning_activity",
         "behavioral/secret_scanning_activity"
     ],
 
     "databricks_compromise": [
         # Databricks employee access monitoring
-        "binary/databricks_employee_logon",
+        "event-based/databricks_employee_logon",
 
         # Account-level configuration changes
-        "binary/configuration_changes_account_level",
-        "binary/sso_config_changed",
-        "binary/user_admin_account_change"
+        "event-based/configuration_changes_account_level",
+        "event-based/sso_config_changed",
+        "event-based/user_admin_account_change",
+        "event-based/account_admin_privileged_role_assignment",
+        "event-based/workspace_admin_privileged_role_assignment"
     ],
 
     "ransomware": [
         # Configuration tampering to disrupt access
-        "binary/configuration_changes_high_priority",
-        "binary/configuration_changes_account_level",
-        "binary/configuration_changes_workspace_level",
+        "event-based/configuration_changes_high_priority",
+        "event-based/configuration_changes_account_level",
+        "event-based/configuration_changes_workspace_level",
 
         # Destructive activities to deny access
-        "binary/user_account_deleted",
-        "binary/group_deleted",
-        "binary/principal_removed_from_group",
-        "binary/user_role_modified",
+        "event-based/user_account_deleted",
+        "event-based/group_deleted",
+        "event-based/principal_removed_from_group",
+        "event-based/user_role_modified",
         "behavioral/spike_in_table_admin_activity",
 
         # Audit evasion
-        "binary/verbose_audit_logging_disabled"
+        "event-based/verbose_audit_logging_disabled"
     ],
 
     "resource_abuse": [

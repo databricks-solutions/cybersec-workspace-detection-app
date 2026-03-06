@@ -160,8 +160,8 @@ def parse_detection_file(file_path: str, user_email: Optional[str] = None) -> Di
     # Extract detection info from metadata
     detection_info = metadata.get('dscc', {}).get('detection', {})
 
-    # Determine if this is a binary or behavioral detection based on file path
-    is_binary = '/binary/' in file_path
+    # Determine if this is an event-based or behavioral detection based on file path
+    is_binary = '/event-based/' in file_path
 
     return {
         "file_path": file_path,
@@ -186,7 +186,7 @@ def discover_detections(base_path: str = None, detection_list: List[str] = None,
 
     Args:
         base_path: Base path to scan for detections (if detection_list is None)
-        detection_list: List of specific detection paths to load (e.g., ["binary/sso_config_changed", "behavioral/access_token_created"])
+        detection_list: List of specific detection paths to load (e.g., ["event-based/sso_config_changed", "behavioral/access_token_created"])
         user_email: Optional user email for user-specific filtering
 
     Returns:
@@ -200,7 +200,7 @@ def discover_detections(base_path: str = None, detection_list: List[str] = None,
         print(f"Loading {len(detection_list)} specific detections...")
         print(f"Repo root: {repo_root}")
         for detection_path in detection_list:
-            # detection_path is like "binary/sso_config_changed" or "behavioral/access_token_created"
+            # detection_path is like "event-based/sso_config_changed" or "behavioral/access_token_created"
             # Build path: repo_root + /base/detections/ + detection_path + .py
             full_path = os.path.join(repo_root, "base", "detections", detection_path)
             if not full_path.endswith('.py'):
