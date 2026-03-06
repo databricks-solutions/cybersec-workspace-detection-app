@@ -1,5 +1,5 @@
 # Databricks notebook source
-# MAGIC %run ../../lib/common
+# MAGIC %run ../../../lib/common
 
 # COMMAND ----------
 
@@ -70,19 +70,22 @@
 # MAGIC |----------|--------|------------------|
 # MAGIC | Metastore ownership changed | `updateMetastore` with owner field | Direct audit log query |
 # MAGIC | User/SPN/Group added to specified metastore admin groups | `addPrincipalToGroup` or `addPrincipalsToGroup` | Widget-configured group list |
+# MAGIC | User/SPN added to a child group of a monitored metastore admin group | `addPrincipalToGroup` or `addPrincipalsToGroup` | Transitive child group resolution (one level) |
+# MAGIC | Any group membership change (no widget configured) | `addPrincipalToGroup` or `addPrincipalsToGroup` | All account-level group events captured for triage |
 # MAGIC
-# MAGIC **Required:** set the `metastore_admin_groups` widget with comma-separated group names (e.g., `metastore-admins,unity-catalog-admins`)
+# MAGIC **Optional:** set the `metastore_admin_groups` widget with comma-separated group names (e.g., `metastore-admins,unity-catalog-admins`) to scope group alerts. If left empty, all account-level group membership additions are captured.
 # MAGIC
 # MAGIC ### ❌ Uncovered Cases (NOT Detected)
 # MAGIC
 # MAGIC | Scenario | Recommendation |
 # MAGIC |----------|----------------|
 # MAGIC | User/SPN/Group added to metastore admin groups not in widget | Keep widget updated with all known metastore admin groups |
-# MAGIC | User/SPN added to nested groups that have metastore admin | When a nested group is added to a monitored admin group (detected), users/SPNs added to that nested group later inherit admin privileges indirectly (not detected). Monitor nested groups separately. |
+# MAGIC | User/SPN added to deeply nested groups (>1 level) that have metastore admin | Current resolution is one level deep; extend child group logic recursively if needed |
 # MAGIC | Historical metastore admin group members before detection deployment | Run initial group membership audit at deployment |
 # MAGIC
 # MAGIC **Important Notes:**
 # MAGIC - This detection focuses on **metastore ownership changes** and **group membership additions** that are logged in audit events
+# MAGIC - Child group resolution looks back at full audit history (unbounded) to find groups nested inside monitored metastore admin groups
 # MAGIC - For complete coverage, supplement with periodic group entitlement audits
 # MAGIC - Keep the `metastore_admin_groups` widget parameter updated as new metastore admin groups are created
 
@@ -117,15 +120,51 @@ def metastore_admin_privilege_granted(earliest: str = None, latest: str = None, 
     if metastore_admin_groups and metastore_admin_groups.strip():
         group_list = [g.strip() for g in metastore_admin_groups.split(",") if g.strip()]
 
-        df_group_additions = df.filter(
-            (col("event_time").between(earliest, latest)) &
+        # Resolve one level of nested groups: find any non-user principals
+        # (i.e. child groups) that were added to a monitored metastore admin group in
+        # audit history, and add them to the filter list.
+        _uuid_pat = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        _email_pat = ".*@.*"
+        _base = (
+            (col("service_name") == "accounts") &
             (col("action_name").isin(group_membership_actions)) &
             (col("request_params.targetGroupName").isin(group_list))
+        )
+        child_via_principal = df.filter(
+            _base &
+            col("request_params.principal").isNotNull() &
+            (~col("request_params.principal").rlike(_email_pat)) &
+            (~col("request_params.principal").rlike(_uuid_pat))
+        ).select(col("request_params.principal").alias("child_group"))
+
+        child_via_target_user = df.filter(
+            _base &
+            col("request_params.targetUserName").isNotNull() &
+            (~col("request_params.targetUserName").rlike(_email_pat)) &
+            (~col("request_params.targetUserName").rlike(_uuid_pat))
+        ).select(col("request_params.targetUserName").alias("child_group"))
+
+        child_group_rows = child_via_principal.union(child_via_target_user).distinct().collect()
+        child_groups = [row["child_group"] for row in child_group_rows]
+        expanded_group_list = list(set(group_list + child_groups))
+
+        df_group_additions = df.filter(
+            (col("event_time").between(earliest, latest)) &
+            (col("service_name") == "accounts") &
+            (col("action_name").isin(group_membership_actions)) &
+            (col("request_params.targetGroupName").isin(expanded_group_list))
         )
 
         df_combined = df_direct.unionByName(df_group_additions, allowMissingColumns=True)
     else:
-        df_combined = df_direct
+        # No admin groups configured — capture all account-level group membership
+        # events for manual triage rather than silently dropping them.
+        df_all_group_additions = df.filter(
+            (col("event_time").between(earliest, latest)) &
+            (col("service_name") == "accounts") &
+            (col("action_name").isin(group_membership_actions))
+        )
+        df_combined = df_direct.unionByName(df_all_group_additions, allowMissingColumns=True)
 
     df_detailed = df_combined.select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
@@ -133,17 +172,16 @@ def metastore_admin_privilege_granted(earliest: str = None, latest: str = None, 
         col("action_name").alias("ACTION"),
         col("source_ip_address").alias("SRC_IP"),
         col("service_name").alias("SERVICE_NAME"),
-        coalesce(
-            col("request_params.target_user_name"),
-            col("request_params.targetUserName"),
-            col("request_params.owner"),
-            col("request_params.principal")
-        ).alias("TARGET_PRINCIPAL_NAME"),
+        when(col("request_params.target_user_name").isNotNull(), col("request_params.target_user_name"))
+        .when(col("request_params.targetUserName").isNotNull(), col("request_params.targetUserName"))
+        .when(col("request_params.owner").isNotNull(), col("request_params.owner"))
+        .when(col("request_params.principal").isNotNull(), col("request_params.principal"))
+        .otherwise(lit(None)).alias("TARGET_PRINCIPAL_NAME"),
         col("request_params.targetUserId").alias("TARGET_USER_ID"),
         col("request_params.metastore_id").alias("METASTORE_ID"),
         col("request_params.name").alias("METASTORE_NAME"),
         col("request_params.endpoint").alias("ENDPOINT"),
-        col("request_params.target_group_name").alias("TARGET_GROUP_NAME"),
+        col("request_params.targetGroupName").alias("TARGET_GROUP_NAME"),
         col("request_params.targetServicePrincipalName").alias("TARGET_SPN_NAME"),
         col("request_params.roles").alias("ROLES_ASSIGNED"),
         col("user_agent").alias("USER_AGENT"),
