@@ -1,0 +1,716 @@
+{
+  "detections": [
+    {
+      "name": "Access Token Created",
+      "function_name": "access_token_created",
+      "sql_function_name": "detect_access_token_created",
+      "source_notebook": "base/detections/behavioral/access_token_created.py",
+      "category": "behavioral",
+      "description": "Detects access tokens created from unknown IPs or user agents with a non-zero lifetime.",
+      "objective": "Identify potentially suspicious access token creation events by filtering for: the `generateDbToken` action within the `accounts` service, tokens created outside of known IP address and user agent baselines, and tokens with a measurable lifespan (i.e., not ephemeral). This helps surface anomalous authentication behavior that may signify credential abuse, script-based automation, or unauthorized access attempts.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "ea49708b-50cf-4926-b734-c8acef522744",
+      "author": "derek.king"
+    },
+    {
+      "name": "Access Token Deleted",
+      "function_name": "access_token_deleted",
+      "sql_function_name": "detect_access_token_deleted",
+      "source_notebook": "base/detections/behavioral/access_token_deleted.py",
+      "category": "behavioral",
+      "description": "Detects access tokens being revoked via the accounts service.",
+      "objective": "Monitor for explicit revocation of access tokens to track potentially suspicious cleanup activity, such as unauthorized credential invalidation or the concealment of prior access.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "479f8708-b446-4a2a-af32-0c14ee52a5d4",
+      "author": "derek.king"
+    },
+    {
+      "name": "Group Created",
+      "function_name": "group_created",
+      "sql_function_name": "detect_group_created",
+      "source_notebook": "base/detections/behavioral/group_created.py",
+      "category": "behavioral",
+      "description": "Detects the creation of user groups within the accounts service.",
+      "objective": "Track group creation events to detect unauthorized role or permission group provisioning, which could indicate privilege escalation or lateral movement preparation by a threat actor.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "0586fc83-f4c5-492e-83e4-867cd71d1a8e",
+      "author": "derek.king"
+    },
+    {
+      "name": "Mfa Key Added",
+      "function_name": "mfa_key_added",
+      "sql_function_name": "detect_mfa_key_added",
+      "source_notebook": "base/detections/behavioral/mfa_key_added.py",
+      "category": "behavioral",
+      "description": "Detects the addition of multi-factor authentication keys to user accounts.",
+      "objective": "Monitor MFA key enrollment activity to detect security posture changes or unauthorized configuration updates that could indicate account setup by attackers or privilege escalation attempts.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "49f8236d-72e6-4678-bb96-8423b4ca953f",
+      "author": "derek.king"
+    },
+    {
+      "name": "Mfa Key Deleted",
+      "function_name": "mfa_key_deleted",
+      "sql_function_name": "detect_mfa_key_deleted",
+      "source_notebook": "base/detections/behavioral/mfa_key_deleted.py",
+      "category": "behavioral",
+      "description": "Detects deletion of multi-factor authentication keys from user accounts.",
+      "objective": "Monitor for MFA key deletion events to detect potential weakening of account protection mechanisms, which may indicate malicious tampering, user compromise, or unauthorized configuration changes.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "b01eda04-95ef-4813-8b81-c2b09d95f22c",
+      "author": "derek.king"
+    },
+    {
+      "name": "Non Sso Login Detected",
+      "function_name": "non_sso_login_detected",
+      "sql_function_name": "detect_non_sso_login_detected",
+      "source_notebook": "base/detections/behavioral/non_sso_login_detected.py",
+      "category": "behavioral",
+      "description": "Detects successful user logins that bypass SSO-based authentication methods.",
+      "objective": "Identify authentication events that do not use the approved browser-based SAML SSO method, which may signal use of service credentials, misconfigured identity settings, or potential account compromise.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "9c9a83ff-472a-408b-ae7c-148637267699",
+      "author": "derek.king"
+    },
+    {
+      "name": "Potential Data Movement Commands with Explicit Credentials",
+      "function_name": "potential_data_movement_explicit_creds",
+      "sql_function_name": "detect_potential_data_movement_explicit_creds",
+      "source_notebook": "base/detections/behavioral/potential_data_movement_explicit_creds.py",
+      "category": "behavioral",
+      "description": "Detects events where users execute commands that could involve explicit credentials for data movement operations, such as DBFS mounts, storage credential operations, or connection management.",
+      "objective": "Identify potentially suspicious data movement activities where explicit credentials might be provided instead of using existing secure configurations. These operations could indicate data exfiltration attempts or unauthorized data movement to external cloud accounts. Maps to MITRE ATT&CK TA0010 - Exfiltration - T1537 - Transfer Data to Cloud Account.",
+      "severity": "high",
+      "fidelity": "medium",
+      "taxonomy": [
+        "MITRE.TA0010.Exfiltration",
+        "MITRE.T1537.Transfer_Data_to_Cloud_Account"
+      ],
+      "false_positives": "normal user behavior that involves copying data, and normal admin activity that should generally be reviewed.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "8a4f5c6d-1e2b-4a3c-9f8e-7b5d9a1c3e2f",
+      "author": "David Veuve - Databricks"
+    },
+    {
+      "name": "Potential Data Movement Commands with SQL Queries",
+      "function_name": "potential_data_movement_sql_queries",
+      "sql_function_name": "detect_potential_data_movement_sql_queries",
+      "source_notebook": "base/detections/behavioral/potential_data_movement_sql_queries.py",
+      "category": "behavioral",
+      "description": "Detects SQL queries that contain COPY INTO statements with explicit credentials, which could indicate data exfiltration attempts using SQL commands with embedded credentials.",
+      "objective": "Identify potentially suspicious SQL queries that use COPY INTO commands with explicit credentials instead of using secure, pre-configured storage credentials. These queries could indicate attempts to exfiltrate data to external locations using embedded credentials in SQL statements. Maps to MITRE ATT&CK TA0010 - Exfiltration - T1537 - Transfer Data to Cloud Account.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0010.Exfiltration",
+        "MITRE.T1537.Transfer_Data_to_Cloud_Account"
+      ],
+      "false_positives": "normal user behavior that involves copying data.",
+      "source_tables": [
+        "system.query.history"
+      ],
+      "uuid": "9b5e6f7a-2c3d-4b4e-8f9a-6c7e8d2f4a3b",
+      "author": "David Veuve - Databricks"
+    },
+    {
+      "name": "Potential Data Movement via Workspace Downloads",
+      "function_name": "potential_data_movement_workspace_downloads",
+      "sql_function_name": "detect_potential_data_movement_workspace_downloads",
+      "source_notebook": "base/detections/behavioral/potential_data_movement_workspace_downloads.py",
+      "category": "behavioral",
+      "description": "Detects downloads from the workspace including exports, large query results, file downloads, and model artifacts that could indicate data exfiltration attempts.",
+      "objective": "Identify potentially suspicious download activities that could indicate data exfiltration attempts. This includes large query result downloads, workspace exports in non-source formats, file downloads, and model version downloads. These activities may indicate unauthorized data movement or intellectual property theft. Maps to MITRE ATT&CK TA0010 - Exfiltration - T1567 - Exfiltration Over Web Service.",
+      "severity": "medium",
+      "fidelity": "low",
+      "taxonomy": [
+        "MITRE.TA0010.Exfiltration",
+        "MITRE.T1567.Exfiltration_Over_Web_Service"
+      ],
+      "false_positives": "normal user activities",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+      "author": "David Veuve - Databricks"
+    },
+    {
+      "name": "Principal Added To Group",
+      "function_name": "principal_added_to_group",
+      "sql_function_name": "detect_principal_added_to_group",
+      "source_notebook": "base/detections/behavioral/principal_added_to_group.py",
+      "category": "behavioral",
+      "description": "Detects the addition of a user or service principal to a group.",
+      "objective": "Monitor group membership assignments to detect unauthorized privilege escalation or role provisioning, which may signal insider misuse or preparatory steps in a broader attack.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "ae8eeedf-aa3d-4611-ad8d-0deed1bbd255",
+      "author": "derek.king"
+    },
+    {
+      "name": "Secrets Discovery",
+      "function_name": "secret_scanning_activity",
+      "sql_function_name": "detect_secret_scanning_activity",
+      "source_notebook": "base/detections/behavioral/secret_scanning_activity.py",
+      "category": "behavioral",
+      "description": "Detects when someone enumerates what secrets exist in the environment by looking for users who list secret scopes and access multiple secrets.",
+      "objective": "Identify potential reconnaissance activities where an attacker or malicious insider enumerates available secrets in the environment. This detection triggers when users list secret scopes and subsequently access a high number of secrets, which may indicate secret discovery or credential harvesting attempts. Maps to MITRE ATT&CK TA0007 - Discovery - T1526 - Cloud Service Discovery.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0007.Discovery",
+        "MITRE.T1526.Cloud_Service_Discovery"
+      ],
+      "false_positives": "Adjust scopes_threshold and secrets_threshold to manage false positives for your environment. Real world testing shows this behavior is rare.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "7f3e4b8c-9d2a-4f6e-8b5c-1a9e7d3b4c8f",
+      "author": "David Veuve - Databricks"
+    },
+    {
+      "name": "Session Hijacking Frequent Logins",
+      "function_name": "session_hijack_high_session_count",
+      "sql_function_name": "detect_session_hijack_high_session_count",
+      "source_notebook": "base/detections/behavioral/session_hijacking_frequent_logins.py",
+      "category": "behavioral",
+      "description": "Detects a high volume of login events from different public IPs and user agents in a short time window.",
+      "objective": "Identify burst login activity that may indicate session hijacking or automated attempts to reuse stolen credentials, by tracking users logging in from multiple IPs with unusual frequency over a short duration.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "High -- JSESSION_ID has been redacted in databricks logs",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "c1855110-7429-4d41-ab1e-ad23dd3e1ea3",
+      "author": "derek.king"
+    },
+    {
+      "name": "Session Hijacking Multi Device",
+      "function_name": "session_hijack_multi_session_multi_device",
+      "sql_function_name": "detect_session_hijack_multi_session_multi_device",
+      "source_notebook": "base/detections/behavioral/session_hijacking_multi_device.py",
+      "category": "behavioral",
+      "description": "Detects rapid user session reuse across different IP addresses or user agents",
+      "objective": "Identify potential session hijacking by flagging logins that switch between IPs or devices within a short timeframe, which may indicate credential theft, account compromise, or abuse of persistent sessions.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "databricks redacts the JSESSION_ID field making this detection noisy, and prone to errors",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "bd7b94f0-40fa-42c5-b7a0-ef6b72e96ee6",
+      "author": "derek.king"
+    },
+    {
+      "name": "Session Hijacking Session Count",
+      "function_name": "session_hijack_session_count",
+      "sql_function_name": "detect_session_hijack_session_count",
+      "source_notebook": "base/detections/behavioral/session_hijacking_session_count.py",
+      "category": "behavioral",
+      "description": "Detects user sessions reused across multiple public IPs or devices within a short timeframe.",
+      "objective": "Identify suspicious reuse of authenticated sessions by tracking access patterns that involve multiple distinct public IP addresses or user agents within a 24-hour period, indicating potential session hijacking or credential sharing.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "High. JSESSION_ID needed for reliable tracking is redacted in the databricks audit logs",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "53e42333-ee45-4772-83b2-74699c581748",
+      "author": "derek.king"
+    },
+    {
+      "name": "Spike In Table Admin Activity",
+      "function_name": "spikes_in_admin_activity",
+      "sql_function_name": "detect_spikes_in_admin_activity",
+      "source_notebook": "base/detections/behavioral/spike_in_table_admin_activity.py",
+      "category": "behavioral",
+      "description": "Detects abnormal increases in unique admin-level queries executed by users.",
+      "objective": "Identify spikes in administrative command usage by calculating deviations from a user average query volume, helping detect potential misuse of privileges, compromised accounts, or scripted attacks.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "37ae13e6-8e76-4928-98ee-5c303dfc259d",
+      "author": "derek.king"
+    },
+    {
+      "name": "Token Scanning Activity",
+      "function_name": "token_scanning_activity",
+      "sql_function_name": "detect_token_scanning_activity",
+      "source_notebook": "base/detections/behavioral/token_scanning_activity.py",
+      "category": "behavioral",
+      "description": "Detects anomalously low activity from API tokens across multiple IP addresses.",
+      "objective": "Identify suspicious low-usage patterns of personal access tokens (PATs) across varying IPs or user agents, which may indicate brute-force attempts to scan for valid tokens or abuse of leaked credentials. API connectivity using a token for scanning appears as a single login event, - with no further actions.. Look for a comparatively low number per src_ip. (1 event is registered per connection attempt, whereas a genuine connection (auth'd) will have potentially 100's of entries)",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "565ad252-a499-4c20-88b4-2c23b6a2bca2",
+      "author": "derek.king"
+    },
+    {
+      "name": "User Account Created",
+      "function_name": "user_account_created",
+      "sql_function_name": "detect_user_account_created",
+      "source_notebook": "base/detections/behavioral/user_account_created.py",
+      "category": "behavioral",
+      "description": "Detects new user accounts created via the admin console.",
+      "objective": "Identify user account creation events through the admin console to detect unauthorized provisioning activity, potential insider threats, or abuse of administrative privileges.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.T1098.Account_Manipulation",
+        "MITRE.T1098.001.Account_Manipulation.Create_Account",
+        "MITRE.T1078.Valid_Accounts",
+        "MITRE.T1078.001.Valid_Accounts.Default_Accounts"
+      ],
+      "false_positives": "If the account is created by a user whose role requires creating user accounts, then this is likely a false positive. But account creation is also a key way to maintain persistence.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "4883ddd6-e357-40a9-a45d-98ab07c81856",
+      "author": "derek.king"
+    },
+    {
+      "name": "User Password Changed",
+      "function_name": "user_password_changed",
+      "sql_function_name": "detect_user_password_changed",
+      "source_notebook": "base/detections/behavioral/user_password_changed.py",
+      "category": "behavioral",
+      "description": "Detects password change events performed through the accounts service.",
+      "objective": "Track password changes across user accounts to identify potentially unauthorized credential resets, which could indicate account takeover attempts, insider misuse, or lateral movement within the environment.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "4a08a09a-31b0-4bd5-b500-5080e16d006a",
+      "author": "derek.king"
+    },
+    {
+      "name": "Account Admin Privileged Role Assignment",
+      "function_name": "account_admin_privileged_role_assignment",
+      "sql_function_name": "detect_account_admin_privileged_role_assignment",
+      "source_notebook": "base/detections/event-based/account_admin_privileged_role_assignment.py",
+      "category": "event-based",
+      "description": "Detects when account admin privileges are assigned to specific users or service principals through direct privilege grants, or when users/SPNs are added to designated account admin groups.",
+      "objective": "Identify targeted and granular account admin privilege grants through direct assignment to individual principals (setAccountAdmin, setAdmin), account ownership changes (changeAccountOwner), or by adding specific users/SPNs to monitored account admin groups. Uses a configurable widget to specify known account admin group names (comma-separated). This detection focuses on individual and targeted privilege escalation events rather than group-level role assignments. Account admin is the highest privilege level in Databricks and grants complete control over workspace management, billing, user management, and security settings. Unauthorized grants could indicate privilege escalation attempts, insider threats, or compromised accounts attempting to establish persistence.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0003.Persistence",
+        "MITRE.T1098.Account_Manipulation"
+      ],
+      "false_positives": "Legitimate administrative actions by authorized account admins during normal user provisioning, role changes, or organizational restructuring. Ensure the admin_groups parameter includes only groups that actually have account admin entitlements to reduce false positives.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "author": "Kotaiba Alachkar"
+    },
+    {
+      "name": "Account Level Configuration Changes",
+      "function_name": "configuration_changes_account_level",
+      "sql_function_name": "detect_configuration_changes_account_level",
+      "source_notebook": "base/detections/event-based/configuration_changes_account_level.py",
+      "category": "event-based",
+      "description": "Detects when users modify account-level settings, which could indicate privilege escalation attempts or unauthorized administrative changes to tenant-wide configurations.",
+      "objective": "Identify potentially suspicious account-level configuration changes that could affect the entire Databricks tenant. These modifications might indicate attempts to escalate privileges, weaken security controls, or establish persistence at the tenant level. Maps to MITRE ATT&CK TA0004 - Privilege Escalation - T1484 - Domain or Tenant Policy Modification.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "MITRE.TA0004.Privilege_Escalation",
+        "MITRE.T1484.Domain_or_Tenant_Policy_Modification"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "author": "David Veuve - Databricks"
+    },
+    {
+      "name": "Admin User Account Changes",
+      "function_name": "user_admin_account_change",
+      "sql_function_name": "detect_user_admin_account_change",
+      "source_notebook": "base/detections/event-based/user_admin_account_change.py",
+      "category": "event-based",
+      "description": "Detects when users modify admin-level privileges or admin group memberships, which could indicate privilege escalation attempts or unauthorized administrative access modifications.",
+      "objective": "Identify potentially suspicious changes to administrative privileges including direct admin role assignments, account ownership changes, and modifications to admin group memberships. These activities could indicate attempts to establish persistence through elevated privileges or unauthorized administrative access. Maps to MITRE ATT&CK TA0003 - Persistence - T1098 - Account Manipulation.",
+      "severity": "medium",
+      "fidelity": "low",
+      "taxonomy": [
+        "MITRE.TA0003.Persistence",
+        "MITRE.T1098.Account_Manipulation"
+      ],
+      "false_positives": "normal admin activity that should generally be reviewed.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "4d5e6f7a-8b9c-0d1e-2f3a-4b5c6d7e8f9a",
+      "author": "David Veuve - Databricks"
+    },
+    {
+      "name": "Attempted Logon From Denied Ip",
+      "function_name": "attempted_logon_from_denied_ip",
+      "sql_function_name": "detect_attempted_logon_from_denied_ip",
+      "source_notebook": "base/detections/event-based/attempted_logon_from_denied_ip.py",
+      "category": "event-based",
+      "description": "Detects blocked login attempts from IP addresses denied by workspace access control policies.",
+      "objective": "Identify logon attempts from explicitly denied IPs that bypass known service agents and telemetry paths, which may indicate unauthorized scanning activity, policy testing, or brute-force attempts from untrusted networks.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "5e7e72b8-5174-447f-970d-3ba5772ca8e9",
+      "author": "derek.king"
+    },
+    {
+      "name": "Databricks Employee Logon",
+      "function_name": "databricks_employee_logon",
+      "sql_function_name": "detect_databricks_employee_logon",
+      "source_notebook": "base/detections/event-based/databricks_employee_logon.py",
+      "category": "event-based",
+      "description": "Detects successful GENIE_AUTH logins that occurred without verbose auditing at the workspace level.",
+      "objective": "Identify successful authentication events from Databricks employees to ensure compliance with policies.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "a1491bb6-ee58-47f3-b64c-9358948ca4d4",
+      "author": "derek.king"
+    },
+    {
+      "name": "Group Deleted",
+      "function_name": "group_deleted",
+      "sql_function_name": "detect_group_deleted",
+      "source_notebook": "base/detections/event-based/group_deleted.py",
+      "category": "event-based",
+      "description": "Detects the deletion of user or role groups through the accounts service.",
+      "objective": "Monitor group deletions to detect unauthorized dismantling of access control structures, which could indicate privilege abuse, insider threats, or attempts to erase evidence of prior access.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "3229fd85-6d16-42d9-a765-64136e9f1435",
+      "author": "derek.king"
+    },
+    {
+      "name": "High Priority Configuration Changes",
+      "function_name": "configuration_changes_high_priority",
+      "sql_function_name": "detect_configuration_changes_high_priority",
+      "source_notebook": "base/detections/event-based/configuration_changes_high_priority.py",
+      "category": "event-based",
+      "description": "Detects high-priority configuration changes including verbose audit logging modifications, IP access list changes, and customer-approved workspace login configuration updates that could impact security posture.",
+      "objective": "Monitor critical configuration changes that could weaken security controls, modify access policies, or reduce system visibility. This includes verbose audit logging being disabled, IP access list modifications, and customer-approved workspace login configuration changes which may signal attacker evasion, insider threat activity, or unauthorized configuration tampering.",
+      "severity": "medium",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0004.Privilege_Escalation",
+        "MITRE.T1484.Domain_or_Tenant_Policy_Modification"
+      ],
+      "false_positives": "admins reconfiguring workspaces. Consider coping to production or sensitive workspaces.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "5f9ae8gc-6gch-535d-aa0f-33f7fgcc6556",
+      "author": "Derek King - Databricks"
+    },
+    {
+      "name": "Metastore Admin Privilege Granted",
+      "function_name": "metastore_admin_privilege_granted",
+      "sql_function_name": "detect_metastore_admin_privilege_granted",
+      "source_notebook": "base/detections/event-based/metastore_admin_privilege_granted.py",
+      "category": "event-based",
+      "description": "Detects when metastore ownership is changed or when users/SPNs are added to designated metastore admin groups.",
+      "objective": "Identify metastore admin privilege grants through metastore ownership changes (updateMetastore with owner field) or by adding specific users/SPNs/nested groups to monitored metastore admin groups. Uses a configurable widget to specify known metastore admin group names (comma-separated). Metastore admin is a high-level Unity Catalog privilege that grants complete control over managing catalogs, schemas, tables, views, and all data access permissions. Unauthorized grants could indicate privilege escalation attempts, insider threats, or compromised accounts attempting to establish persistence and gain unauthorized data access.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0003.Persistence",
+        "MITRE.T1098.Account_Manipulation"
+      ],
+      "false_positives": "Legitimate administrative actions by authorized account or metastore admins during normal user provisioning, role changes, or data governance restructuring.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+      "author": "Kotaiba Alachkar"
+    },
+    {
+      "name": "Principal Removed From Group",
+      "function_name": "principal_removed_from_group",
+      "sql_function_name": "detect_principal_removed_from_group",
+      "source_notebook": "base/detections/event-based/principal_removed_from_group.py",
+      "category": "event-based",
+      "description": "Detects the removal of a user or service principal from a group",
+      "objective": "Monitor group membership changes to detect unauthorized removal of users or service principals from access groups, which may indicate privilege manipulation or attempts to disrupt access controls and auditing.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "453d8ca5-1ffe-42c2-82c5-c830907df86f",
+      "author": "derek.king"
+    },
+    {
+      "name": "Sso Config Changed",
+      "function_name": "sso_config_changed",
+      "sql_function_name": "detect_sso_config_changed",
+      "source_notebook": "base/detections/event-based/sso_config_changed.py",
+      "category": "event-based",
+      "description": "Detects creation or update of single sign-on (SSO) configuration settings.",
+      "objective": "Monitor for changes to SSO configuration to detect unauthorized identity provider tampering, which could allow attackers to redirect authentication flows or weaken enterprise access controls.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "60daabdb-eec7-45f1-8d66-9911344140f8",
+      "author": "derek.king"
+    },
+    {
+      "name": "TruffleHog Scan Detected",
+      "function_name": "trufflehog_scan_detected",
+      "sql_function_name": "detect_trufflehog_scan_detected",
+      "source_notebook": "base/detections/event-based/trufflehog_scan_detected.py",
+      "category": "event-based",
+      "description": "Detects when TruffleHog scanning tool is used, indicating potential credential scanning activity and likely credential leakage.",
+      "objective": "Identify when TruffleHog scanning tool is used in the environment, which typically indicates an attacker is scanning for hardcoded credentials, API keys, or other secrets. This is a high-fidelity indicator of credential scanning activity and potential credential compromise.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0007.Discovery",
+        "MITRE.T1526.Cloud_Service_Discovery"
+      ],
+      "false_positives": "Low -- TruffleHog is a specific security scanning tool with a distinctive user agent string. False positives are unlikely unless there are legitimate security testing activities.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "8f4e5c9d-3b3b-5f7f-9c6d-2b0f8e4c5d9g",
+      "author": "david.veuve"
+    },
+    {
+      "name": "User Account Deleted",
+      "function_name": "user_account_deleted",
+      "sql_function_name": "detect_user_account_deleted",
+      "source_notebook": "base/detections/event-based/user_account_deleted.py",
+      "category": "event-based",
+      "description": "Detects user account deletions initiated through the accounts service.",
+      "objective": "Monitor user deletions to detect potential insider threats or unauthorized administrative actions that could be used to erase accounts and disrupt auditing or accountability.",
+      "severity": "low",
+      "fidelity": "medium",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "a9dd1fc1-21e6-475a-979f-88a62f62904f",
+      "author": "derek.king"
+    },
+    {
+      "name": "User Role Modified",
+      "function_name": "user_role_modified",
+      "sql_function_name": "detect_user_role_modified",
+      "source_notebook": "base/detections/event-based/user_role_modified.py",
+      "category": "event-based",
+      "description": "Detects changes to user roles or administrative group membership.",
+      "objective": "Track modifications to user roles or elevation to administrative groups to identify potential privilege escalation, unauthorized access provisioning, or insider threat activity.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "456f1e21-ba8b-4321-9954-18647d317988",
+      "author": "derek.king"
+    },
+    {
+      "name": "Verbose Audit Logging Disabled",
+      "function_name": "verbose_audit_disabled",
+      "sql_function_name": "detect_verbose_audit_disabled",
+      "source_notebook": "base/detections/event-based/verbose_audit_logging_disabled.py",
+      "category": "event-based",
+      "description": "Detects when verbose audit logging is explicitly disabled at the workspace configuration level.",
+      "objective": "Monitor configuration changes that disable verbose audit logs to detect attempts at reducing system visibility, which may signal attacker evasion, insider threat activity, or unauthorized configuration tampering.",
+      "severity": "low",
+      "fidelity": "high",
+      "taxonomy": [
+        "none"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "acfbe7ce-8108-4d6b-816b-f7963ec2bae1",
+      "author": "derek.king"
+    },
+    {
+      "name": "Workspace Admin Privileged Role Assignment",
+      "function_name": "workspace_admin_privileged_role_assignment",
+      "sql_function_name": "detect_workspace_admin_privileged_role_assignment",
+      "source_notebook": "base/detections/event-based/workspace_admin_privileged_role_assignment.py",
+      "category": "event-based",
+      "description": "Detects when workspace admin privileges are assigned to users/SPNs through direct admin entitlement grants or additions to the workspace admins group.",
+      "objective": "Identify workspace admin privilege grants through two mechanisms: (1) Direct admin entitlement assignment (setAdmin, addAdmin) which automatically adds principals to the admins group, or (2) Direct addition of users/SPNs to the system reserved \"admins\" group. The \"admins\" group is a fixed system group in every Databricks workspace that cannot be removed. Workspace admin grants full administrative control over workspace resources including clusters, jobs, notebooks, repos, and workspace settings. Unauthorized grants could indicate privilege escalation attempts, insider threats, or compromised accounts attempting to establish persistence.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0003.Persistence",
+        "MITRE.T1098.Account_Manipulation"
+      ],
+      "false_positives": "Legitimate administrative actions by authorized workspace admins during normal user provisioning, role changes, or organizational restructuring.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+      "author": "Kotaiba Alachkar"
+    },
+    {
+      "name": "Workspace Configuration Changes",
+      "function_name": "configuration_changes_workspace_level",
+      "sql_function_name": "detect_configuration_changes_workspace_level",
+      "source_notebook": "base/detections/event-based/configuration_changes_workspace_level.py",
+      "category": "event-based",
+      "description": "Detects when users modify workspace-level configurations, including security-relevant settings such as export restrictions and other workspace policies that could affect security posture.",
+      "objective": "Identify potentially suspicious workspace-level configuration changes that could weaken security controls, modify data export policies, or establish unauthorized access patterns. These modifications might indicate attempts to escalate privileges or bypass security controls at the workspace level. Maps to MITRE ATT&CK TA0004 - Privilege Escalation - T1484 - Domain or Tenant Policy Modification.",
+      "severity": "low",
+      "fidelity": "low",
+      "taxonomy": [
+        "MITRE.TA0004.Privilege_Escalation",
+        "MITRE.T1484.Domain_or_Tenant_Policy_Modification"
+      ],
+      "false_positives": "unknown",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+      "author": "David Veuve - Databricks"
+    }
+  ],
+  "summary": {
+    "total": 34,
+    "skipped": 0,
+    "by_category": {
+      "behavioral": 18,
+      "event-based": 16
+    },
+    "by_severity": {
+      "high": 10,
+      "low": 21,
+      "medium": 3
+    },
+    "source_tables": [
+      "system.access.audit",
+      "system.query.history"
+    ]
+  }
+}
