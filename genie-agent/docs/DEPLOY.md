@@ -121,8 +121,8 @@ Ask the agent, in plain language:
 - *"Who changed the IP allow list in the last 30 days?"* → must call
   `detect_ip_access_list_changes`, not hand-write a query filtering
   `audit_level='ACCOUNT_LEVEL'`
-- *"Show me the before and after values"* → must return `previous_value` and
-  `new_value`
+- *"Show me the before and after IP values"* → must say the CIDRs are **not in
+  the audit log** and point at the REST API, NOT invent an empty diff
 - *"Did anyone disable audit logging?"* → must surface the `CRITICAL` severity row
 
 If it hand-writes SQL instead of calling a function, the function's `Use for:`

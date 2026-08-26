@@ -23,13 +23,28 @@ SELECT * FROM <catalog>.security_detections.detect_ip_access_list_changes(
 ORDER BY event_time DESC
 ```
 
-**"Show me the full allow-list changelog with before and after values"**
+**"Show me the full allow-list changelog"**
 ```sql
-SELECT event_time, actor, action, list_label, list_type,
-       previous_value, new_value, source_ip, user_agent
+-- NOTE: the audit log does NOT contain the CIDR values for these events (only
+-- the list id + actor), so there is no before/after IP column to select.
+-- Resolve ip_access_list_id via GET /api/2.0/ip-access-lists for current ranges.
+SELECT event_time, actor, action, ip_access_list_id, change_seq,
+       source_ip, user_agent, status
 FROM <catalog>.security_detections.detect_ip_access_list_changes(
   TIMESTAMP'2026-08-01 00:00:00', current_timestamp())
-ORDER BY list_label, event_time
+ORDER BY ip_access_list_id, event_time
+```
+
+**"Which lists were changed most often?"**
+```sql
+-- A list edited repeatedly in a short window is worth a closer look.
+SELECT ip_access_list_id, count(*) AS changes,
+       min(event_time) AS first_change, max(event_time) AS last_change,
+       concat_ws(', ', collect_set(actor)) AS actors
+FROM <catalog>.security_detections.detect_ip_access_list_changes(
+  TIMESTAMP'2026-08-01 00:00:00', current_timestamp())
+GROUP BY ip_access_list_id
+ORDER BY changes DESC
 ```
 
 **"Were there failed attempts to change the IP allow list?"**

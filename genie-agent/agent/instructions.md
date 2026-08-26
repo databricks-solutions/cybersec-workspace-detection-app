@@ -61,17 +61,39 @@ a real event can be missing:
    `SELECT audit_level, service_name, action_name, count(*) FROM
    system.access.audit WHERE event_time >= … GROUP BY 1,2,3 ORDER BY 4 DESC`
 
-## Audit logs record submissions, not diffs
+## Audit logs record that a change happened, rarely what it changed to
 
-There is **no previous-value column** anywhere in `system.access.audit`.
-`request_params` holds the state that was *submitted*. A before/after diff must
-be reconstructed with `LAG(...) OVER (PARTITION BY <entity id> ORDER BY
-event_time)` — which `detect_ip_access_list_changes` already does.
+**IP access lists carry NO IP values.** Verified against live audit data across
+all IP-ACL mutations in a 90-day window: `createIpAccessList`,
+`updateIpAccessList` and `deleteIpAccessList` carry exactly two
+`request_params` keys — `ipAccessListId` and `userId` — and `response.result` is
+NULL. There is no `ipAddresses`, no label, no list type, and no before/after
+payload.
 
-When an analyst asks for a "change diff," give them the reconstructed
-previous/new pair and be explicit that it is derived from consecutive events, not
-stored by the platform. The first change to any entity has a NULL previous value
-because there is no earlier event, not because it was empty.
+So when an analyst asks for the IP allow list "diff" or "what IPs were added":
+
+1. Give them the changelog `detect_ip_access_list_changes` returns — which list
+   id, who, when, from which IP, with which client, success or failure.
+2. State plainly that **the CIDR values are not in the audit log**, so the
+   before/after IP ranges cannot be produced from audit data at all.
+3. Point them at the IP Access Lists REST API
+   (`GET /api/2.0/ip-access-lists`) to resolve `ip_access_list_id` to the list's
+   *current* contents.
+4. Say that **historical** values are unrecoverable — if they need them going
+   forward, list state must be captured on a schedule.
+
+Do **not** attempt `LAG(request_params['ipAddresses'])` or similar. Those keys do
+not exist, so it returns NULL for every row — which reads as "the list was
+empty" or "nothing changed" and is worse than refusing the question.
+
+**Account-level settings are the exception.** `setSetting` events *do* carry the
+new value in `request_params['settingValueForAudit']`, which
+`detect_config_changes_account_level` returns as `new_value`. Note
+`settingName` is often empty while `settingTypeName` holds the meaningful
+identifier (e.g. `abac_grants`), so report the type.
+
+`workspaceConfEdit` also carries its value, in
+`request_params['workspaceConfValues']`.
 
 ## Distinguish success from attempt
 

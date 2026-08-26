@@ -92,16 +92,35 @@ window function is self-contained.
 reporting column. `setSetting` is the real exception and genuinely is
 account-scoped.
 
-**`request_params` key names are not guaranteed.** They mirror API payloads and
-vary by action and API version. The ported IP-ACL function uses
-`COALESCE(request_params['ip_addresses'], request_params['ipAddresses'])` for
-exactly this reason. Confirm keys against live data —
-`SELECT request_params FROM system.access.audit WHERE action_name='…' LIMIT 5` —
-rather than trusting the API docs.
+**`request_params` keys do NOT match the REST API field names.** Verify every key
+against live data before shipping a function — a wrong key returns NULL, not an
+error, so the function looks like it works while silently answering nothing.
+Verified keys (SFE workspace, 90-day window, 2026-08-26):
 
-**There is no previous-value column.** A "diff" must be reconstructed with
-`LAG(...) OVER (PARTITION BY <entity> ORDER BY event_time)`. The first event for
-any entity necessarily has a NULL previous value.
+| action | keys |
+|---|---|
+| create/update/deleteIpAccessList | `ipAccessListId`, `userId` — **that is all** |
+| accountIpAclsValidationFailed | `sourceIpAddress`, `user` |
+| IpAccessDenied | `path`, `userId`, `user` |
+| workspaceConfEdit | `workspaceConfKeys`, `workspaceConfValues` |
+| setSetting | `settingName`, `settingTypeName`, `settingKeyName`, `settingValueForAudit`, `settingKeyTypeName` |
+
+Enumerate before assuming:
+`SELECT action_name, map_keys(request_params) FROM system.access.audit WHERE action_name='…' LIMIT 5`
+
+**IP access list events contain NO IP values.** The most important finding of this
+port. Across all 54 IP-ACL mutations in a live 90-day window, `request_params`
+held exactly two keys (above) and `response.result` was NULL on every row. A
+before/after CIDR diff is therefore **impossible** from audit data. An earlier
+draft of the ported function did `LAG(request_params['ip_addresses'])` and would
+have returned NULL for every value — looking functional while answering nothing.
+Resolve `ipAccessListId` against `GET /api/2.0/ip-access-lists` for current
+contents; historical values are unrecoverable.
+
+**But some events DO carry values** — do not over-generalise the rule above.
+`setSetting` has `settingValueForAudit`; `workspaceConfEdit` has
+`workspaceConfValues`. Note `settingName` is frequently EMPTY while
+`settingTypeName` holds the meaningful identifier (e.g. `abac_grants`).
 
 **Enumerate before concluding absence.** Action names differ across
 environments and feature enablement. Before deciding a detection has no
