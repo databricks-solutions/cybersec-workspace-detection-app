@@ -54,8 +54,8 @@ Generate focused investigation notebooks combining multiple detections for speci
 | Threat Model | Detections | Risk Description (Source: Databricks SBP) |
 |-------------|-----------|-------------------------------------------|
 | **Account Takeover or Compromise** | 17 detections | Databricks is a general-purpose compute platform that customers can set up to access critical data sources. If credentials belonging to a user were compromised by phishing, brute force, or other methods, an attacker might get access to all of the data accessible by the compromised user from the environment. |
-| **Data Exfiltration** | 8 detections | If a malicious user or an attacker is able to log into a customer's environment, they may be able to exfiltrate sensitive data and then store it, sell it, or ransom it. |
-| **Insider Threat** | 14 detections | High-performing engineers and data professionals will generally find the best or fastest way to complete their tasks, but sometimes that may do so in ways that create security impacts to their organizations. One user may think their job would be much easier if they didn't have to deal with security controls, or another might copy some data to simplify sharing of data. |
+| **Data Exfiltration** | 9 detections | If a malicious user or an attacker is able to log into a customer's environment, they may be able to exfiltrate sensitive data and then store it, sell it, or ransom it. |
+| **Insider Threat** | 15 detections | High-performing engineers and data professionals will generally find the best or fastest way to complete their tasks, but sometimes that may do so in ways that create security impacts to their organizations. One user may think their job would be much easier if they didn't have to deal with security controls, or another might copy some data to simplify sharing of data. |
 | **Supply Chain Attacks** | 3 detections | Historically, supply chain attacks have relied upon injecting malicious code into software libraries. More recently, we have started to see the emergence of AI model and data supply chain attacks, whereby the model, its weights or the data itself is maliciously altered. |
 | **Potential Compromise of Databricks** | 4 detections | Security-minded customers sometimes voice a concern that Databricks itself might be compromised, which could result in the compromise of their environment. |
 | **Ransomware Attacks** | 9 detections | Ransomware is a type of malware designed to deny an individual or organization access to their data, usually for the purposes of extortion. Encryption is often used as the vehicle for this attack. |
@@ -155,7 +155,7 @@ The notebook will run all detections filtered to the specified user and display 
 - Metastore Admin Privilege Granted - `/base/detections/event-based/metastore_admin_privilege_granted.py`
 - Workspace Admin Privileged Role Assignment - `/base/detections/event-based/workspace_admin_privileged_role_assignment.py`
 
-### Behavioral Detections (18 Total)
+### Behavioral Detections (19 Total)
 
 **Purpose**: Pattern analysis and threat hunting
 **Time Window**: 30 days (configurable)
@@ -177,10 +177,11 @@ The notebook will run all detections filtered to the specified user and display 
 - Token Scanning Activity - `/base/detections/behavioral/token_scanning_activity.py`
 - Secret Scanning Activity - `/base/detections/behavioral/secret_scanning_activity.py`
 
-#### Data Movement & Exfiltration (3)
+#### Data Movement & Exfiltration (4)
 - Potential Data Movement via SQL Queries - `/base/detections/behavioral/potential_data_movement_sql_queries.py`
 - Potential Data Movement via Workspace Downloads - `/base/detections/behavioral/potential_data_movement_workspace_downloads.py`
 - Potential Data Movement via Explicit Credentials - `/base/detections/behavioral/potential_data_movement_explicit_creds.py`
+- Bulk Notebook Export - `/base/detections/behavioral/bulk_notebook_export.py`
 
 #### User & Group Management (5)
 - User Account Created - `/base/detections/behavioral/user_account_created.py`
