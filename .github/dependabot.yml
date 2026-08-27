@@ -1,0 +1,22 @@
+# Dependabot configuration.
+#
+# This repo ships notebooks that run on Databricks Runtime, so it has no
+# requirements.txt / pyproject.toml to scan -- the Python dependencies come from
+# DBR itself. Only GitHub Actions is ecosystem-scannable here, and pinning action
+# versions matters: a compromised third-party action runs with whatever token the
+# workflow grants it, which is the supply-chain risk that actually applies to a
+# repo shaped like this one.
+#
+# Dependabot SECURITY updates (alerts on known-vulnerable dependencies) are a
+# separate repo setting and are enabled independently of this file.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
