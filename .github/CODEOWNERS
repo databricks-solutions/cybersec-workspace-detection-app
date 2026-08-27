@@ -1,0 +1,30 @@
+# Code owners for cybersec-workspace-detection-app.
+#
+# Replaces the repo-root CODEOWNERS.txt, which GitHub never read: only
+# CODEOWNERS, .github/CODEOWNERS and docs/CODEOWNERS are recognised, so a file
+# named CODEOWNERS.txt has no effect. (It was also empty.)
+#
+# CODEOWNERS only auto-REQUESTS review. It does not enforce it unless a branch
+# protection rule or ruleset on `main` requires code-owner approval -- see
+# CONTRIBUTING.md.
+
+# Default owners for everything.
+* @dveuve @arunpamulapati
+
+# Detection content -- changes here alter what customers detect, so they warrant
+# a detection-author's eye specifically.
+/base/detections/ @dveuve @arunpamulapati
+
+# Shared library. A change here can silently alter every detection that imports
+# it, which is a wider blast radius than any single detection file.
+/lib/ @dveuve @arunpamulapati
+
+# Genie Agent surface: the SQL functions customers install, and the instructions
+# that stop the agent producing confidently-wrong answers.
+/genie-agent/ @arunpamulapati @dveuve
+
+# Repo-level policy and CI.
+/.github/ @arunpamulapati @dveuve
+/SECURITY.md @arunpamulapati @dveuve
+/LICENSE @arunpamulapati @dveuve
+/NOTICE @arunpamulapati @dveuve
