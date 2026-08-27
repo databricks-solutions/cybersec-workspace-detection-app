@@ -117,7 +117,7 @@ python genie-agent/deploy/install.py \
   --warehouse-id <your-sql-warehouse-id>
 ```
 
-That creates the schema, installs all 32 detection functions, and creates the
+That creates the schema, installs all 33 detection functions, and creates the
 Genie Agent with every function registered. Re-runnable — functions are `CREATE
 OR REPLACE`, and passing `--space-id <id>` updates an existing agent instead of
 creating a second one.
@@ -137,7 +137,7 @@ catalog.
 ### Step 3.3 — Confirm and smoke-test
 
 ```sql
-SHOW USER FUNCTIONS IN main.security_detections;   -- expect 32
+SHOW USER FUNCTIONS IN main.security_detections;   -- expect 33
 
 SELECT * FROM main.security_detections.detect_config_changes_high_priority(
   current_timestamp() - INTERVAL 90 DAYS, current_timestamp())
@@ -188,7 +188,7 @@ to the function's `Use for:` list, or add an Example SQL Query.
 
 ## 6. Questions you can ask
 
-**32 functions covering all 34 detections in this repo.** By theme:
+**33 functions covering all 35 detections in this repo.** By theme:
 
 **IP access & network** — who changed the IP allow list; who deleted a list;
 failed attempts to change IP rules; who was blocked and what they were reaching
@@ -206,7 +206,9 @@ scanners like TruffleHog.
 access; SSO/IdP configuration changes.
 
 **Data movement** — new storage credentials, mounts and external connections;
-`COPY INTO` with inline credentials; download and export volume per user.
+`COPY INTO` with inline credentials; download and export volume per user; bulk
+notebook export scored against each principal's own history (source-code
+exfiltration).
 
 **Secrets** — identities that enumerate secret scopes *and* read many distinct
 secrets (the discovery pattern, not just normal reads).
@@ -226,7 +228,7 @@ distinguishes Terraform/CLI/SDK from a person clicking).
 More in [`agent/example_questions.md`](agent/example_questions.md).
 
 **Expect some functions to return nothing**, and read that carefully. In one
-reference account 19 of 32 returned data and 13 were empty — because those events
+reference account 19 of 33 returned data and 14 were empty — because those events
 simply do not occur there, not because the function is broken. See
 [Limits](#7-limits-you-must-know-before-trusting-an-answer).
 
@@ -340,7 +342,7 @@ Layout:
 
 ```
 genie-agent/
-├── functions/     32 UC SQL functions (4 themed files)
+├── functions/     33 UC SQL functions (4 themed files)
 ├── agent/         instructions, example questions, serialized_space template
 ├── deploy/        install.py -- one-command install
 ├── tools/         metadata extractor
@@ -363,14 +365,14 @@ python genie-agent/tools/extract_detection_metadata.py --repo-root . \
 
 Exits non-zero if a notebook fails to parse, so CI catches silent under-coverage.
 
-**Verification status.** All 32 functions were installed and executed against a
-live workspace (SFE, 90-day window, 2026-08-26): 32/32 created, 32/32 executed
-without error, 19 returning data and 13 legitimately empty. Every
+**Verification status.** All 33 functions were installed and executed against a
+live workspace (SFE, 90-day window, 2026-08-26): 33/33 created, 33/33 executed
+without error, 19 returning data and 14 legitimately empty. Every
 `request_params` key is verified against live data rather than the REST API docs —
 they differ, and a wrong key returns NULL rather than erroring. Keys are listed at
 the top of each SQL file.
 
-**Coverage: 34/34 detections in 32 functions.** Fewer functions than detections
+**Coverage: 35/35 detections in 33 functions.** Fewer functions than detections
 because four near-identical notebooks were merged into two: `mfa_key_added` +
 `mfa_key_deleted` → `detect_mfa_key_changes`, and the four group notebooks →
 `detect_group_changes`. Genie selects better from one well-described function than

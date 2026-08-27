@@ -316,3 +316,124 @@ RETURN
       OR upper(a.request_params['commandText']) LIKE '%GRANT ADMIN%')
   GROUP BY to_date(a.event_time), a.user_identity.email
   HAVING COUNT(*) >= min_commands;
+
+-- --------------------------------------------------------------------------
+-- Bulk notebook export -- per-principal anomaly, not a global threshold.
+-- Port of behavioral/bulk_notebook_export.py (David Veuve, PR #11).
+--
+-- WHY THIS EXISTS ALONGSIDE detect_data_movement_downloads: that function
+-- EXCLUDES workspaceExport with format SOURCE, treating it as normal
+-- development -- and SOURCE is exactly the format a bulk export of code uses.
+-- So the broad download detection deliberately misses source-code exfiltration,
+-- and this one covers it. Keep both.
+--
+-- THE SCORING IS THE DETECTION. Each principal is measured against its OWN
+-- history via a Tukey-style fence, not one global number:
+--
+--     fence = Q3 + iqr_multiplier * max(Q3 - Q1, iqr_floor)
+--
+-- Measured on a live workspace over 60 days, this is why that matters:
+--
+--     actor                  active days   peak day   median   fence
+--     service principal A         16          230        9      538
+--     a human user                19          193        3      510
+--     another human               60          113       12      533
+--
+-- A single global threshold tuned for the 230-notebook service principal would
+-- never fire on a user whose normal day is 3 notebooks. Zero false positives in
+-- that window, while staying close enough above observed peaks to catch a real
+-- spike.
+--
+-- Three noise controls from the source notebook, all preserved:
+--   * baseline_exclude_days -- trailing days are excluded from the baseline, so a
+--     live in-progress bulk export cannot inflate its own fence.
+--   * self-export exclusion -- a principal reading under its own home directory
+--     (/Workspace/Users/<self>/...) is platform tooling (Databricks Apps pulling
+--     a deployment bundle), not cross-user exfiltration.
+--   * no_baseline_threshold -- a first-seen principal has no history, so it is
+--     scored against a flat number rather than being invisible. That is the
+--     failure mode that would matter most in a real incident: a new account
+--     exfiltrating on day one.
+--
+-- NOTEBOOKS_EXPORTED counts DISTINCT paths, so re-exporting one notebook 500
+-- times reads as 1. That is correct for IP exfiltration (breadth of code taken,
+-- not request volume) and is deliberate -- do not "fix" it to a raw count.
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_bulk_notebook_export(
+  start_time            TIMESTAMP COMMENT 'Start of the search window (inclusive). Use 60+ days so each principal has a baseline.',
+  end_time              TIMESTAMP COMMENT 'End of the search window (inclusive)',
+  baseline_exclude_days INT       COMMENT 'Trailing days excluded from the baseline so a live export cannot inflate its own fence. Source notebook default: 2',
+  iqr_multiplier        DOUBLE    COMMENT 'Multiplier on the floored IQR when building the fence. Source notebook default: 5.0',
+  iqr_floor             INT       COMMENT 'Minimum IQR term, guaranteeing a minimum absolute rise over normal. Source notebook default: 100',
+  no_baseline_threshold INT       COMMENT 'Flat threshold for a principal with no baseline. Source notebook default: 600'
+)
+RETURNS TABLE (
+  event_date         DATE   COMMENT 'Day of the bulk export (UTC)',
+  actor              STRING COMMENT 'Principal that exported',
+  notebooks_exported BIGINT COMMENT 'DISTINCT notebooks exported that day',
+  threshold_applied  DOUBLE COMMENT 'This principal own fence, or the flat fallback when it has no history',
+  iqrs_from_median   DOUBLE COMMENT 'How many IQRs above this principal normal day -- the anomaly magnitude',
+  baseline_median    DOUBLE COMMENT 'This principal usual daily count, for context',
+  formats_used       STRING COMMENT 'Export formats seen. SOURCE means raw code',
+  analysis           STRING COMMENT 'One-line summary for triage'
+)
+COMMENT 'Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration, and it is deliberately NOT covered by the general download detection, which excludes SOURCE-format exports as normal development -- the exact format bulk code theft uses. Self-exports from a principal own home directory are excluded as platform tooling; first-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration.'
+RETURN
+  -- The CTE chain is wrapped in a subquery deliberately. A SQL UDF body cannot
+  -- begin with a top-level WITH: the CREATE fails with an opaque
+  -- "request failed due to an unexpected condition" (no parse error, no line
+  -- number). Verified live -- the identical query runs standalone but the CREATE
+  -- is rejected until the WITH sits inside SELECT * FROM ( ... ).
+  SELECT * FROM (
+  WITH exports AS (
+    SELECT
+      to_date(a.event_time) AS event_date,
+      a.user_identity.email AS actor,
+      a.request_params['notebookFullPath'] AS notebook_path,
+      a.request_params['workspaceExportFormat'] AS export_format
+    FROM system.access.audit AS a
+    WHERE a.action_name = 'workspaceExport'
+      AND a.event_time BETWEEN start_time AND end_time
+      AND NOT contains(COALESCE(a.request_params['notebookFullPath'], ''),
+                       COALESCE(a.user_identity.email, ' '))
+  ),
+  per_user_day AS (
+    SELECT event_date, actor,
+           COUNT(DISTINCT notebook_path) AS notebooks_exported,
+           CONCAT_WS('/', COLLECT_SET(export_format)) AS formats_used
+    FROM exports
+    GROUP BY event_date, actor
+  ),
+  baseline AS (
+    SELECT * FROM per_user_day
+    WHERE event_date < date_sub(current_date(), baseline_exclude_days)
+  ),
+  per_user_threshold AS (
+    SELECT
+      actor,
+      percentile_approx(notebooks_exported, 0.5) AS median,
+      (percentile_approx(notebooks_exported, 0.75)
+       - percentile_approx(notebooks_exported, 0.25)) AS iqr,
+      (percentile_approx(notebooks_exported, 0.75)
+       + iqr_multiplier * GREATEST(
+           percentile_approx(notebooks_exported, 0.75)
+           - percentile_approx(notebooks_exported, 0.25),
+           CAST(iqr_floor AS DOUBLE))) AS user_threshold
+    FROM baseline
+    GROUP BY actor
+  )
+  SELECT
+    d.event_date,
+    d.actor,
+    d.notebooks_exported,
+    ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1),
+    ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1),
+    ROUND(t.median, 1),
+    d.formats_used,
+    CONCAT(CAST(d.notebooks_exported AS STRING), ' notebooks exported (threshold ',
+           CAST(ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1) AS STRING),
+           ', formats: ', d.formats_used, ')')
+  FROM per_user_day AS d
+  LEFT JOIN per_user_threshold AS t ON d.actor = t.actor
+  WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE))
+  );

@@ -19,8 +19,8 @@ So: metadata generated, `Use for:` phrasings written by hand.
 ## Verified about the source set
 
 ```
-34 detections   18 behavioral / 16 event-based
-severity        10 high / 3 medium / 21 low
+35 detections   19 behavioral / 16 event-based
+severity        11 high / 3 medium / 21 low
 source tables   system.access.audit (33), system.query.history (1)
 lib/common.py helpers used by a detection   NONE
 ```
@@ -29,16 +29,16 @@ That last line is the important one. `lib/common.py` (586 LOC) carries pandas
 UDFs and MaxMind GeoIP enrichment that SQL cannot express — but **no current
 detection calls them**, so all 34 are SQL-portable today.
 
-## Ported: all 34
+## Ported: all 35
 
 | File | Functions | Detections covered |
 |---|---|---|
 | `01_ip_access_and_config.sql` | 5 | IP access lists, high-priority + account-level config, denied logons |
 | `02_identity_and_access.sql` | 15 | tokens, admin grants (account/workspace/metastore), user lifecycle, roles, passwords, MFA, groups, non-SSO + employee logon, SSO config |
-| `03_data_movement_and_secrets.sql` | 7 | storage credentials, COPY INTO, downloads, secrets discovery, credential scanners, token scanning, admin SQL spike |
+| `03_data_movement_and_secrets.sql` | 8 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike |
 | `04_sessions_and_config.sql` | 5 | session hijacking ×3, verbose-audit-logging evasion, workspace config |
 
-**32 functions for 34 detections.** Four near-identical notebooks were merged into
+**33 functions for 35 detections.** Four near-identical notebooks were merged into
 two, deliberately: `mfa_key_added` + `mfa_key_deleted` → `detect_mfa_key_changes`,
 and `group_created` + `group_deleted` + `principal_added_to_group` +
 `principal_removed_from_group` → `detect_group_changes`. Genie selects better from
@@ -46,8 +46,8 @@ one well-described function than from several near-duplicates, and both directio
 of a change answer the same investigative question ("did group membership change
 for this principal?").
 
-Verified on a live workspace: 32/32 installed, 32/32 executed without error, 19
-returning data and 13 legitimately empty because those events do not occur in
+Verified on a live workspace: 33/33 installed, 33/33 executed without error, 19
+returning data and 14 legitimately empty because those events do not occur in
 that account.
 
 ### Deliberate deviations from the source notebooks
@@ -130,6 +130,14 @@ contents; historical values are unrecoverable.
 `setSetting` has `settingValueForAudit`; `workspaceConfEdit` has
 `workspaceConfValues`. Note `settingName` is frequently EMPTY while
 `settingTypeName` holds the meaningful identifier (e.g. `abac_grants`).
+
+**A SQL UDF body cannot begin with a top-level `WITH`.** The CTE has to sit inside
+a subquery — `RETURN SELECT * FROM ( WITH … )`. Without the wrap, `CREATE FUNCTION`
+fails with `The request failed due to an unexpected condition`: no parse error, no
+line number, nothing pointing at the CTE. The identical query runs fine
+standalone, which makes it look like a permissions or transport problem rather
+than a syntax one. Cost real time on `detect_bulk_notebook_export`; the wrap is
+commented in place so nobody "tidies" it away.
 
 **Enumerate before concluding absence.** Action names differ across
 environments and feature enablement. Before deciding a detection has no

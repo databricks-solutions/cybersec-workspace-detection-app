@@ -41,6 +41,27 @@
       "author": "derek.king"
     },
     {
+      "name": "Bulk Notebook Export",
+      "function_name": "bulk_notebook_export",
+      "sql_function_name": "detect_bulk_notebook_export",
+      "source_notebook": "base/detections/behavioral/bulk_notebook_export.py",
+      "category": "behavioral",
+      "description": "Detects when a principal exports an anomalously high number of distinct notebooks in a single day relative to their own historical baseline, which may indicate bulk source-code exfiltration.",
+      "objective": "Identify potential intellectual property or source-code exfiltration through bulk notebook exports. Each principal is measured against their own history using a per-user IQR-based fence (Q3 + iqr_multiplier * max(IQR, iqr_floor)), so a user who never bulk-exports is flagged at a far lower volume than an automated backup account. Self-exports (a principal reading files under its own home directory, e.g. Databricks Apps deployment bundles) are excluded as platform noise. Maps to MITRE ATT&CK TA0010 - Exfiltration - T1567 - Exfiltration Over Web Service.",
+      "severity": "high",
+      "fidelity": "high",
+      "taxonomy": [
+        "MITRE.TA0010.Exfiltration",
+        "MITRE.T1567.Exfiltration_Over_Web_Service"
+      ],
+      "false_positives": "Automated backup, migration, or platform tooling that legitimately exports many notebooks. Tune iqr_multiplier, iqr_floor, and no_baseline_threshold for your environment. The per-user baseline and self-export exclusion remove the most common sources of noise.",
+      "source_tables": [
+        "system.access.audit"
+      ],
+      "uuid": "b4b7d1fe-8bfe-4979-85bf-14243ffb96b6",
+      "author": "David Veuve - Databricks"
+    },
+    {
       "name": "Group Created",
       "function_name": "group_created",
       "sql_function_name": "detect_group_created",
@@ -697,14 +718,14 @@
     }
   ],
   "summary": {
-    "total": 34,
+    "total": 35,
     "skipped": 0,
     "by_category": {
-      "behavioral": 18,
+      "behavioral": 19,
       "event-based": 16
     },
     "by_severity": {
-      "high": 10,
+      "high": 11,
       "low": 21,
       "medium": 3
     },
