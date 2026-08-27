@@ -26,4 +26,5 @@
 # Repo-level policy and CI.
 /.github/ @arunpamulapati @dveuve
 /SECURITY.md @arunpamulapati @dveuve
-/LICENSE.md @arunpamulapati @dveuve
+/LICENSE @arunpamulapati @dveuve
+/NOTICE @arunpamulapati @dveuve
