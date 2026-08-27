@@ -2,6 +2,11 @@
 
 Self-service install. ~20 minutes.
 
+**Two paths.** The **install notebook** (`genie-agent/deploy/install_notebook`, run
+from a Git folder) is recommended -- no CLI, no local Python. The steps below are
+the manual/CLI equivalent, for workspaces that cannot reach GitHub or where you
+want to see each step. Both are re-runnable and produce the same result.
+
 ## Prerequisites
 
 | Requirement | Why | Check |

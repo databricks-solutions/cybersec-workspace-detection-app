@@ -58,6 +58,7 @@ be watching your account.** Keep them running.
 | 2 | A SQL warehouse | Any size. Serverless is easiest |
 | 3 | Access to audit logs | Query below |
 | 4 | Permission to create a schema | Ask your Databricks admin for `CREATE SCHEMA` on a catalog |
+| 5 | A Git folder, **or** the Databricks CLI | Git folder is easiest; CLI is the fallback if your workspace cannot reach GitHub |
 
 **Check #3 now** — it blocks more installs than anything else. In a SQL editor:
 
@@ -108,7 +109,27 @@ If `set_to` is `false` anywhere, **write down that date.** From then until it wa
 re-enabled, your logs are incomplete — and no tool can recover what was never
 written. Turn verbose audit logging back on before relying on this agent.
 
-### Step 3.2 — Install everything with one command
+### Step 3.2 — Install everything
+
+**Recommended: run the install notebook from a Git folder.** No Databricks CLI, no
+local Python, nothing cloned to your laptop.
+
+1. **Workspace → Create → Git folder** →
+   `https://github.com/databricks-solutions/cybersec-workspace-detection-app`
+2. Open **`genie-agent/deploy/install_notebook`** from inside that Git folder
+3. Attach any cluster (serverless is fine) and fill in the widgets:
+   - **catalog** — a catalog your security team owns *(required)*
+   - **schema** — defaults to `security_detections`
+   - **warehouse_id** — only if you want the agent created for you; leave blank to
+     install functions only
+4. **Run all**
+
+The notebook finds the SQL files from its own path, so nothing is hardcoded and it
+works wherever you put the Git folder. It also checks your audit visibility
+*before* installing and tells you if verbose audit logging was ever disabled.
+
+**Alternative: the CLI installer.** Use this if your workspace cannot reach GitHub
+(egress restrictions, no Git folder support, air-gapped):
 
 ```bash
 python genie-agent/deploy/install.py \
@@ -117,24 +138,27 @@ python genie-agent/deploy/install.py \
   --warehouse-id <your-sql-warehouse-id>
 ```
 
-That creates the schema, installs all 33 detection functions, and creates the
-Genie Agent with every function registered. Re-runnable — functions are `CREATE
-OR REPLACE`, and passing `--space-id <id>` updates an existing agent instead of
-creating a second one.
+Requires the Databricks CLI configured locally, and a clone of this repo. Same
+result — it just runs from your machine instead of the workspace.
+
+Both are re-runnable: functions are `CREATE OR REPLACE`, and `--space-id` (CLI) or
+the `space_id` widget (notebook) updates an existing agent rather than creating a
+second one. Re-run either after a `git pull`.
 
 Use a catalog your security team owns. The functions only read audit data, but
 **anyone granted `EXECUTE` can read audit data through them**, so scope grants to
 your security team rather than `account users`.
 
-If you would rather do it by hand, run each file in [`functions/`](functions/)
-after find-and-replacing `${CATALOG}` and `${SCHEMA}`. **Replace the placeholders
-— do not substitute a leading `USE CATALOG`.** A bare `CREATE FUNCTION` lands in
+**If you install by hand instead**, run each file in [`functions/`](functions/)
+after find-and-replacing `${CATALOG}` and `${SCHEMA}`. **Replace the placeholders —
+do not substitute a leading `USE CATALOG`.** A bare `CREATE FUNCTION` lands in
 whatever catalog the session defaults to, often `hive_metastore`, and a function
-there cannot reference the Unity Catalog table `system.access.audit`. It fails
-with `UC_COMMAND_NOT_SUPPORTED`, an error that never mentions the session
-catalog.
+there cannot reference the Unity Catalog table `system.access.audit`. It fails with
+`UC_COMMAND_NOT_SUPPORTED`, an error that never mentions the session catalog.
 
 ### Step 3.3 — Confirm and smoke-test
+
+The notebook does this for you (step 4 of the notebook). Manually:
 
 ```sql
 SHOW USER FUNCTIONS IN main.security_detections;   -- expect 33
@@ -344,7 +368,7 @@ Layout:
 genie-agent/
 ├── functions/     33 UC SQL functions (4 themed files)
 ├── agent/         instructions, example questions, serialized_space template
-├── deploy/        install.py -- one-command install
+├── deploy/        install_notebook (recommended) + install.py (CLI fallback)
 ├── tools/         metadata extractor
 └── docs/          DEPLOY.md (terse runbook), PORTING.md (what was ported + traps)
 ```

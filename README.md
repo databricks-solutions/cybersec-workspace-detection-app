@@ -6,17 +6,50 @@ A collection of security detection notebooks for Databricks workspaces that anal
 
 ### What's Inside
 
-This tool provides **34 security detections** organized by urgency and investigation approach:
+This tool provides **35 security detections** organized by urgency and investigation approach:
 - **16 Event-based Detections** - High-confidence alerts for immediate response (24-hour default window)
-- **18 Behavioral Detections** - Pattern analysis for threat hunting (30-day default window)
+- **19 Behavioral Detections** - Pattern analysis for threat hunting (30-day default window)
 
-### Three Ways to Use This Tool
+### Four Ways to Use This Tool
 
-1. **🎯 Threat Model Investigations** - Generate investigation notebooks for 7 specific threat scenarios (Recommended for newcomers)
-2. **📊 User Behavior Analysis** - Generate user-specific activity reports
-3. **🔍 Individual Detections** - Execute specific detection notebooks for targeted analysis
+1. **💬 Genie Agent** - Ask questions in plain English instead of running notebooks (Recommended for investigations)
+2. **🎯 Threat Model Investigations** - Generate investigation notebooks for 7 specific threat scenarios (Recommended for newcomers)
+3. **📊 User Behavior Analysis** - Generate user-specific activity reports
+4. **🔍 Individual Detections** - Execute specific detection notebooks for targeted analysis
 
 👉 **New to this tool?** Start with [Threat Model Investigations](#threat-model-investigations) to investigate common security scenarios.
+
+👉 **Investigating something right now?** Use the [Genie Agent](#genie-agent---ask-your-audit-logs-questions) and just ask.
+
+---
+
+## Genie Agent - Ask Your Audit Logs Questions
+
+Every detection in this repo is also available as a **Genie Agent**, so you can type
+
+> *"Who changed our IP allow list last week?"*
+
+instead of opening a notebook and editing widget parameters.
+
+**Install it from a Git folder — no CLI, no local setup:**
+
+1. **Workspace → Create → Git folder** → this repo's URL
+2. Open **`genie-agent/deploy/install_notebook`**
+3. Fill in the catalog widget, attach any cluster, **Run all**
+
+That installs all 35 detections as Unity Catalog SQL functions and creates the
+agent. A CLI installer (`genie-agent/deploy/install.py`) is also provided for
+workspaces that cannot reach GitHub.
+
+**Questions it answers:** IP access list changes, admin privilege grants, token
+creation, group and MFA changes, SSO configuration, data movement, secrets
+discovery, session anomalies, bulk notebook export, audit-logging evasion.
+
+**This complements the scheduled notebooks — it does not replace them.** The
+notebooks run unattended and produce alerts; the agent answers questions while you
+investigate. Keep both.
+
+Full guide, limits, and troubleshooting: **[genie-agent/README.md](genie-agent/README.md)**
 
 ---
 
@@ -27,7 +60,7 @@ cybersec-workspace-detection-app/
 ├── base/
 │   ├── detections/
 │   │   ├── event-based/     # 16 event-based detections (24-hour window)
-│   │   └── behavioral/      # 18 threat hunting detections (30-day window)
+│   │   └── behavioral/      # 19 threat hunting detections (30-day window)
 │   └── notebooks/
 │       ├── threat_models/   # 7 threat model notebook generators
 │       │   ├── threat_model_account_takeover.py

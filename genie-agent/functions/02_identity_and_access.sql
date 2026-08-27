@@ -146,9 +146,15 @@ RETURN
       OR (
         a.action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup')
         AND admin_groups IS NOT NULL AND trim(admin_groups) <> ''
-        AND COALESCE(a.request_params['targetGroupName'],
-                     a.request_params['target_group_name'])
-            IN (SELECT trim(g) FROM (SELECT explode(split(admin_groups, ',')) AS g))
+        -- array_contains over a split, NOT `IN (SELECT explode(...))`. The
+        -- subquery form creates fine on a SQL warehouse but FAILS inside a UDF
+        -- body on DBR (notebook/spark.sql), so the notebook installer could not
+        -- create these three functions while the CLI installer could. Verified
+        -- live 2026-08-27. Keep this form -- it works on both.
+        AND array_contains(
+              transform(split(admin_groups, ','), x -> trim(x)),
+              COALESCE(a.request_params['targetGroupName'],
+                       a.request_params['target_group_name']))
       )
     );
 
@@ -198,9 +204,15 @@ RETURN
         a.service_name = 'accounts'
         AND a.action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup')
         AND admin_groups IS NOT NULL AND trim(admin_groups) <> ''
-        AND COALESCE(a.request_params['targetGroupName'],
-                     a.request_params['target_group_name'])
-            IN (SELECT trim(g) FROM (SELECT explode(split(admin_groups, ',')) AS g))
+        -- array_contains over a split, NOT `IN (SELECT explode(...))`. The
+        -- subquery form creates fine on a SQL warehouse but FAILS inside a UDF
+        -- body on DBR (notebook/spark.sql), so the notebook installer could not
+        -- create these three functions while the CLI installer could. Verified
+        -- live 2026-08-27. Keep this form -- it works on both.
+        AND array_contains(
+              transform(split(admin_groups, ','), x -> trim(x)),
+              COALESCE(a.request_params['targetGroupName'],
+                       a.request_params['target_group_name']))
       )
     );
 
@@ -248,9 +260,15 @@ RETURN
         a.service_name = 'accounts'
         AND a.action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup')
         AND admin_groups IS NOT NULL AND trim(admin_groups) <> ''
-        AND COALESCE(a.request_params['targetGroupName'],
-                     a.request_params['target_group_name'])
-            IN (SELECT trim(g) FROM (SELECT explode(split(admin_groups, ',')) AS g))
+        -- array_contains over a split, NOT `IN (SELECT explode(...))`. The
+        -- subquery form creates fine on a SQL warehouse but FAILS inside a UDF
+        -- body on DBR (notebook/spark.sql), so the notebook installer could not
+        -- create these three functions while the CLI installer could. Verified
+        -- live 2026-08-27. Keep this form -- it works on both.
+        AND array_contains(
+              transform(split(admin_groups, ','), x -> trim(x)),
+              COALESCE(a.request_params['targetGroupName'],
+                       a.request_params['target_group_name']))
       )
     );
 

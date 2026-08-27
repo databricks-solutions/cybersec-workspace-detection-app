@@ -139,6 +139,17 @@ standalone, which makes it look like a permissions or transport problem rather
 than a syntax one. Cost real time on `detect_bulk_notebook_export`; the wrap is
 commented in place so nobody "tidies" it away.
 
+**A correlated `IN (SELECT explode(...))` creates on a SQL warehouse but FAILS in a
+UDF body on DBR.** The three admin-grant functions used
+`IN (SELECT trim(g) FROM (SELECT explode(split(admin_groups, ',')) AS g))` to match
+a comma-separated parameter. That created fine via the SQL Statement API (DBSQL)
+and silently failed via `spark.sql` in a notebook (DBR) -- so the CLI installer
+reported 33/33 while the notebook installer got 30/33. Use
+`array_contains(transform(split(param, ','), x -> trim(x)), value)` instead: no
+subquery, works on both. Found only by running the notebook installer end to end,
+not by reading it -- **test every install path you ship, they are not
+interchangeable.**
+
 **Enumerate before concluding absence.** Action names differ across
 environments and feature enablement. Before deciding a detection has no
 coverage, run the discovery query in
