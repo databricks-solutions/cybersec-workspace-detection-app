@@ -108,67 +108,67 @@ If `set_to` is `false` anywhere, **write down that date.** From then until it wa
 re-enabled, your logs are incomplete — and no tool can recover what was never
 written. Turn verbose audit logging back on before relying on this agent.
 
-### Step 3.2 — Create a schema to hold the functions
+### Step 3.2 — Install everything with one command
 
-Replace `main` with a catalog your security team owns.
-
-```sql
-CREATE SCHEMA IF NOT EXISTS main.security_detections
-  COMMENT 'Security detection functions for the Genie Agent';
+```bash
+python genie-agent/deploy/install.py \
+  --profile <your-cli-profile> \
+  --catalog main \
+  --warehouse-id <your-sql-warehouse-id>
 ```
 
-### Step 3.3 — Install the functions
+That creates the schema, installs all 32 detection functions, and creates the
+Genie Agent with every function registered. Re-runnable — functions are `CREATE
+OR REPLACE`, and passing `--space-id <id>` updates an existing agent instead of
+creating a second one.
+
+Use a catalog your security team owns. The functions only read audit data, but
+**anyone granted `EXECUTE` can read audit data through them**, so scope grants to
+your security team rather than `account users`.
+
+If you would rather do it by hand, run each file in [`functions/`](functions/)
+after find-and-replacing `${CATALOG}` and `${SCHEMA}`. **Replace the placeholders
+— do not substitute a leading `USE CATALOG`.** A bare `CREATE FUNCTION` lands in
+whatever catalog the session defaults to, often `hive_metastore`, and a function
+there cannot reference the Unity Catalog table `system.access.audit`. It fails
+with `UC_COMMAND_NOT_SUPPORTED`, an error that never mentions the session
+catalog.
+
+### Step 3.3 — Confirm and smoke-test
 
 ```sql
-USE CATALOG main;
-USE SCHEMA security_detections;
-```
+SHOW USER FUNCTIONS IN main.security_detections;   -- expect 32
 
-Now open each file in [`functions/`](functions/) and run it. There is currently
-one: [`01_ip_access_and_config.sql`](functions/01_ip_access_and_config.sql).
-
-Confirm they installed:
-
-```sql
-SHOW USER FUNCTIONS IN main.security_detections;
-```
-
-You should see five names beginning `detect_`.
-
-### Step 3.4 — Test one before going further
-
-```sql
 SELECT * FROM main.security_detections.detect_config_changes_high_priority(
-  current_timestamp() - INTERVAL 90 DAYS,
-  current_timestamp()
-) ORDER BY event_time DESC LIMIT 20;
+  current_timestamp() - INTERVAL 90 DAYS, current_timestamp())
+ORDER BY event_time DESC LIMIT 20;
 ```
 
 Rows → working. No rows → not necessarily broken; see
 [Troubleshooting](#8-troubleshooting).
 
----
-
 ## 4. Create the agent
+
+`install.py` does this for you. This section is for doing it by hand, or for
+understanding what the script created.
 
 In the Databricks UI:
 
-1. Open **Genie** and create a new agent. Name it something obvious, e.g.
-   *Security Audit Investigator*.
-2. **Data** — add `system.access.audit`.
-3. **Trusted Assets** — add all five `detect_*` functions from
-   `main.security_detections`. *This is the important step.* These are verified
-   queries; without them the agent invents its own SQL and can get it subtly
-   wrong.
-4. **Instructions** — open [`agent/instructions.md`](agent/instructions.md),
-   copy the whole thing, paste it in. It teaches the agent the traps in audit
-   data. Do not skip or shorten it.
-5. **Example SQL Queries** — add a few from
-   [`agent/example_questions.md`](agent/example_questions.md), replacing
-   `<catalog>` with your catalog name.
-6. Save, and give your security team access.
+1. **Genie** → create a new agent, e.g. *Databricks Security Audit Investigator*
+2. **Sources** → add `system.access.audit` (and `system.query.history` if you want
+   `detect_data_movement_sql_queries`). Note the Sources picker lists **tables and
+   views only** — your functions will not appear here, and that is expected.
+3. **Configure → Instructions** → paste
+   [`agent/instructions.md`](agent/instructions.md) in full
+4. **Configure → Examples** → this is where the SQL functions go. There is no
+   one-click "add function": each one is a saved parameterised query. Per
+   function you supply a name, a `SELECT * FROM <catalog>.<schema>.<fn>(:start_time,
+   :end_time)` body, both parameters as **Date and Time**, and Usage Guidance
+   text. Budget a couple of minutes each — which is the main reason `install.py`
+   exists.
+5. Save, and share with your security team
 
----
+The docs call these **Trusted Assets**; the UI label is **Examples**. Same thing.
 
 ## 5. Check it works
 
@@ -188,33 +188,47 @@ to the function's `Use for:` list, or add an Example SQL Query.
 
 ## 6. Questions you can ask
 
-Five functions are installed today, covering incident-response basics.
+**32 functions covering all 34 detections in this repo.** By theme:
 
-**IP allow lists**
-- Who changed the IP allow list, and when?
-- Who deleted an IP access list?
-- Were there failed attempts to change IP access rules?
+**IP access & network** — who changed the IP allow list; who deleted a list;
+failed attempts to change IP rules; who was blocked and what they were reaching
+for.
 
-**Security settings**
-- What security settings changed in the last two weeks?
-- Did anyone disable audit logging?
-- What changed at the account level?
+**Identity & privilege** — who was made account, workspace or metastore admin;
+new user accounts; deleted accounts; account attribute and role changes; password
+changes; MFA keys added or removed; group creation, deletion and membership.
 
-**Blocked access**
-- Who was blocked by our IP allow list?
-- Which IP addresses were denied, and what were they trying to reach?
+**Credentials** — who created a personal access token and how long it lives;
+revoked tokens; tokens presenting from many IPs (leaked-token signal); credential
+scanners like TruffleHog.
 
-**Follow-ups**
-- What else did this user do that day?
-- What else came from this IP address?
-- Which changes came from automation rather than a person? *(the `user_agent`
-  column distinguishes Terraform/CLI/SDK from someone clicking in the console)*
+**Authentication** — logins that bypassed SSO; Databricks employee (support)
+access; SSO/IdP configuration changes.
 
-More in [`agent/example_questions.md`](agent/example_questions.md). The other 29
-detections in this repo aren't ported yet — see
-[`docs/PORTING.md`](docs/PORTING.md).
+**Data movement** — new storage credentials, mounts and external connections;
+`COPY INTO` with inline credentials; download and export volume per user.
 
----
+**Secrets** — identities that enumerate secret scopes *and* read many distinct
+secrets (the discovery pattern, not just normal reads).
+
+**Sessions** — one identity from many IPs; one session used from multiple
+devices (the strongest hijacking signal); many sessions from one IP.
+
+**Evasion** — was verbose audit logging disabled, and when did it come back on.
+
+**Configuration** — the security-relevant subset, the complete workspace
+changelog, and account-level settings with their new values.
+
+**Pivots** — what else did this user do that day; what else came from this IP;
+which changes came from automation rather than the console (`user_agent`
+distinguishes Terraform/CLI/SDK from a person clicking).
+
+More in [`agent/example_questions.md`](agent/example_questions.md).
+
+**Expect some functions to return nothing**, and read that carefully. In one
+reference account 19 of 32 returned data and 13 were empty — because those events
+simply do not occur there, not because the function is broken. See
+[Limits](#7-limits-you-must-know-before-trusting-an-answer).
 
 ## 7. Limits you must know before trusting an answer
 
@@ -326,10 +340,11 @@ Layout:
 
 ```
 genie-agent/
-├── functions/     UC SQL functions (the Trusted Assets)
-├── agent/         instructions, example questions, generated catalog
+├── functions/     32 UC SQL functions (4 themed files)
+├── agent/         instructions, example questions, serialized_space template
+├── deploy/        install.py -- one-command install
 ├── tools/         metadata extractor
-└── docs/          DEPLOY.md (terse runbook), PORTING.md (port the other 29)
+└── docs/          DEPLOY.md (terse runbook), PORTING.md (what was ported + traps)
 ```
 
 **Why SQL functions and not the notebooks.** A Genie Agent selects between
@@ -348,11 +363,26 @@ python genie-agent/tools/extract_detection_metadata.py --repo-root . \
 
 Exits non-zero if a notebook fails to parse, so CI catches silent under-coverage.
 
-**Verification status.** All five functions were executed against a live account
-(SFE workspace, 90-day window, 2026-08-26) and return real rows. Every
+**Verification status.** All 32 functions were installed and executed against a
+live workspace (SFE, 90-day window, 2026-08-26): 32/32 created, 32/32 executed
+without error, 19 returning data and 13 legitimately empty. Every
 `request_params` key is verified against live data rather than the REST API docs —
-they differ, and a wrong key returns NULL rather than an error. The key names are
-listed at the top of the SQL file.
+they differ, and a wrong key returns NULL rather than erroring. Keys are listed at
+the top of each SQL file.
+
+**Coverage: 34/34 detections in 32 functions.** Fewer functions than detections
+because four near-identical notebooks were merged into two: `mfa_key_added` +
+`mfa_key_deleted` → `detect_mfa_key_changes`, and the four group notebooks →
+`detect_group_changes`. Genie selects better from one well-described function than
+from several near-duplicates, and both directions of a change answer the same
+investigative question.
+
+**Two deliberate deviations from the notebooks**, both documented inline:
+`detect_admin_sql_activity_spike` reports a threshold count rather than the
+notebook's normalised *rate* (a stateless function has no baseline window to
+normalise against, and faking one would be dishonest), and
+`detect_token_scanning_activity` drops the MaxMind geo enrichment (it needs an
+`.mmdb` file on the cluster; the IP-spread signal is intact).
 
 **One new detection came out of this port:**
 `detect_ip_acl_validation_failures` (`accountIpAclsValidationFailed`), which no

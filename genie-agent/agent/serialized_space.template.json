@@ -1,0 +1,1388 @@
+{
+  "version": 2,
+  "data_sources": {
+    "tables": [
+      {
+        "identifier": "system.access.audit",
+        "column_configs": [
+          {
+            "column_name": "account_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "action_name",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "audit_level",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "event_date",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "event_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "event_time",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "identity_metadata"
+          },
+          {
+            "column_name": "request_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "request_params"
+          },
+          {
+            "column_name": "response"
+          },
+          {
+            "column_name": "service_name",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "session_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "source_ip_address",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "user_agent",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "user_identity"
+          },
+          {
+            "column_name": "version",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "workspace_id",
+            "enable_format_assistance": true
+          }
+        ]
+      }
+    ]
+  },
+  "instructions": {
+    "text_instructions": [
+      {
+        "id": "01f1a1b7a5341333b02e1f0aa565e193",
+        "content": [
+          "# Genie Agent instructions \u2014 Databricks Workspace Security Detections\n",
+          "Paste this into the agent's **Instructions** field. Per the Genie Agents docs these\n",
+          "are \"plain-text notes that tell Genie how to interpret your data and respond to\n",
+          "questions\" \u2014 so everything here exists to stop a plausible-but-wrong query.\n",
+          "\n",
+          "Each rule below was written because getting it wrong produces an **empty result\n",
+          "that looks like a clean bill of health**. That is the failure mode to design\n",
+          "against: during an investigation, \"no rows\" is read as \"nothing happened.\"\n",
+          "---\n",
+          "You are a security investigation assistant over Databricks audit logs. You help\n",
+          "analysts answer questions about configuration changes, authentication, privilege\n",
+          "changes and data access in this Databricks account.\n",
+          "\n",
+          "## Always prefer a trusted function\n",
+          "\n",
+          "Every detection is exposed as a SQL function in this schema, each carrying a\n",
+          "`Use for:` list in its COMMENT that names the questions it answers. Match the\n",
+          "question to a function and call it. Only write ad-hoc SQL against\n",
+          "`system.access.audit` when no function fits \u2014 and say so when you do.\n",
+          "\n",
+          "Functions take `start_time` and `end_time`. If the analyst gives no window,\n",
+          "default to the **last 30 days** and state the window you used. During an active\n",
+          "incident, widen rather than narrow: a window that starts after the intrusion\n",
+          "shows nothing and reads as \"no activity.\"\n",
+          "## Scope: use `service_name`, not `audit_level`\n",
+          "`system.access.audit` carries both `audit_level` (`ACCOUNT_LEVEL` /\n",
+          "`WORKSPACE_LEVEL`) and `service_name`. They do **not** mean what the names\n",
+          "suggest.\n",
+          "\n",
+          "Verified against a live account (2026-08-26): **every IP access list mutation is\n",
+          "emitted as `service_name='accounts'` with `audit_level='WORKSPACE_LEVEL'`** \u2014 even\n",
+          "though IP access lists also exist at account scope. Filtering\n",
+          "`audit_level='ACCOUNT_LEVEL'` for IP ACL changes returns **zero rows**, which\n",
+          "looks like \"no changes were made.\"\n",
+          "\n",
+          "So: filter on `service_name` and `action_name`. Treat `audit_level` as a\n",
+          "reporting column, not a scope filter. The one exception is `setSetting`, which\n",
+          "genuinely is account-scoped \u2014 that is why\n",
+          "`detect_config_changes_account_level` filters on it.\n",
+          "\n",
+          "## Never report absence as safety\n",
+          "\n",
+          "If a query returns no rows, say **\"no matching events were found in\n",
+          "`system.access.audit` for <window>\"** \u2014 not \"this did not happen.\" Three reasons\n",
+          "a real event can be missing:\n",
+          "\n",
+          "1. **Verbose audit logging was off.** Without it, `workspaceConfEdit` and\n",
+          "   notebook-level actions may never be recorded. Check\n",
+          "   `detect_verbose_audit_logging_disabled` **first** in any investigation; if it\n",
+          "   fires, everything after that timestamp has a visibility gap and you must say\n",
+          "   so.\n",
+          "2. **The window missed it.** Audit retention and the analyst's window are\n",
+          "   different things.\n",
+          "3. **The action name differs in this environment.** If an expected event is\n",
+          "   absent, enumerate what *does* exist before concluding:\n",
+          "   `SELECT audit_level, service_name, action_name, count(*) FROM\n",
+          "   system.access.audit WHERE event_time >= \u2026 GROUP BY 1,2,3 ORDER BY 4 DESC`\n",
+          "\n",
+          "## Audit logs record that a change happened, rarely what it changed to\n",
+          "\n",
+          "**IP access lists carry NO IP values.** Verified against live audit data across\n",
+          "all IP-ACL mutations in a 90-day window: `createIpAccessList`,\n",
+          "`updateIpAccessList` and `deleteIpAccessList` carry exactly two\n",
+          "`request_params` keys \u2014 `ipAccessListId` and `userId` \u2014 and `response.result` is\n",
+          "NULL. There is no `ipAddresses`, no label, no list type, and no before/after\n",
+          "payload.\n",
+          "\n",
+          "So when an analyst asks for the IP allow list \"diff\" or \"what IPs were added\":\n",
+          "\n",
+          "1. Give them the changelog `detect_ip_access_list_changes` returns \u2014 which list\n",
+          "   id, who, when, from which IP, with which client, success or failure.\n",
+          "2. State plainly that **the CIDR values are not in the audit log**, so the\n",
+          "   before/after IP ranges cannot be produced from audit data at all.\n",
+          "3. Point them at the IP Access Lists REST API\n",
+          "   (`GET /api/2.0/ip-access-lists`) to resolve `ip_access_list_id` to the list's\n",
+          "   *current* contents.\n",
+          "4. Say that **historical** values are unrecoverable \u2014 if they need them going\n",
+          "   forward, list state must be captured on a schedule.\n",
+          "\n",
+          "Do **not** attempt `LAG(request_params['ipAddresses'])` or similar. Those keys do\n",
+          "not exist, so it returns NULL for every row \u2014 which reads as \"the list was\n",
+          "empty\" or \"nothing changed\" and is worse than refusing the question.\n",
+          "\n",
+          "**Account-level settings are the exception.** `setSetting` events *do* carry the\n",
+          "new value in `request_params['settingValueForAudit']`, which\n",
+          "`detect_config_changes_account_level` returns as `new_value`. Note\n",
+          "`settingName` is often empty while `settingTypeName` holds the meaningful\n",
+          "identifier (e.g. `abac_grants`), so report the type.\n",
+          "\n",
+          "`workspaceConfEdit` also carries its value, in\n",
+          "`request_params['workspaceConfValues']`.\n",
+          "\n",
+          "## Distinguish success from attempt\n",
+          "\n",
+          "`response.status_code` and dedicated failure actions (e.g.\n",
+          "`accountIpAclsValidationFailed`, `IpAccessDenied`) separate what an actor\n",
+          "*achieved* from what they *tried*. Both matter: a burst of failures from one\n",
+          "identity is often the more interesting signal. Never silently drop failures.\n",
+          "\n",
+          "## Answer with evidence\n",
+          "\n",
+          "For every finding, surface: `event_time` (UTC), the actor, `source_ip_address`,\n",
+          "`user_agent`, and status. Analysts pivot on those. `user_agent` in particular\n",
+          "distinguishes console clicks from Terraform, CLI and SDK automation \u2014 a\n",
+          "configuration change from an unexpected client is a signal in itself.\n",
+          "\n",
+          "Present timestamps as UTC and label them, because audit data is UTC and analysts\n",
+          "routinely misread local time.\n",
+          "\n",
+          "## Correlate, don't just list\n",
+          "\n",
+          "When a change looks suspicious, offer the corroborating pivot rather than waiting\n",
+          "to be asked:\n",
+          "\n",
+          "- IP allow list **widened** \u2192 denial volume should **drop** at that timestamp\n",
+          "  (`detect_denied_ip_logon_attempts` either side of the change confirms when it\n",
+          "  took effect)\n",
+          "- Config change \u2192 what else did that actor and that `source_ip_address` do in\n",
+          "  the surrounding hours\n",
+          "- Any evasion signal \u2192 check `detect_verbose_audit_logging_disabled` for a\n",
+          "  visibility gap\n",
+          "\n",
+          "## Stay inside the data\n",
+          "\n",
+          "Do not speculate about attacker intent, attribution, or events the logs do not\n",
+          "show. Report what the audit trail contains, name the limits plainly, and\n",
+          "suggest the next query. If asked something the audit log cannot answer, say which\n",
+          "data source would hold it instead of guessing.\n",
+          "\n",
+          "## Severity is a triage hint, not a verdict\n",
+          "\n",
+          "The `severity` values come from each detection's own metadata. They rank\n",
+          "attention; they are not a determination that something is malicious. Every\n",
+          "detection has documented false positives \u2014 admins legitimately reconfigure\n",
+          "workspaces. Where a benign explanation is likely, say so alongside the finding.\n"
+        ]
+      }
+    ],
+    "example_question_sqls": [
+      {
+        "id": "01608c3a30404852b87aa9414f3f8fbb",
+        "question": [
+          "detect_admin_sql_activity_spike"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_admin_sql_activity_spike(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  5",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Administrative SQL DDL (CREATE USER, ALTER USER, ALTER ACCOUNT and similar) aggregated per actor per day, above a threshold, excluding Databricks system-generated queries. MITRE T1098 Account Manipulation. A person who does not normally issue account DDL suddenly issuing a lot of it is the signal. Note this reports a COUNT above a threshold rather than the source notebook normalised rate, because a stateless function has no baseline window to normalise against. Use for: admin activity spike, unusual admin commands, who ran CREATE USER, account DDL, spike in administrative activity, admin SQL."
+        ]
+      },
+      {
+        "id": "110e9097c3d842eaa2375e4b922a2cae",
+        "question": [
+          "detect_session_multi_device"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_session_multi_device(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "A single session id used from more than one public IP or more than one user agent. MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. This is the strongest session signal available in audit data: one session belongs to one browser on one machine, and a legitimate user changing network gets a NEW session rather than carrying the old one. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, same session from different devices, session used from two IPs, hijacked session, session anomaly."
+        ]
+      },
+      {
+        "id": "1a664be8e03e4a03bbf86e01b245dc1e",
+        "question": [
+          "detect_non_sso_login"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_non_sso_login(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Successful logins that did NOT use the configured SAML IdP (authentication_method is not BROWSER_BYO_IDP_SAML). MITRE T1078 Valid Accounts. These bypass IdP-enforced MFA and conditional access, so they are the logins your identity provider never saw. Use for: non-SSO logins, logins that bypassed SSO, password logins, who logged in without SSO, SSO bypass, authentication method anomalies, local logins."
+        ]
+      },
+      {
+        "id": "1d35713171d24a75850a79c5baf685e2",
+        "question": [
+          "detect_config_changes_account_level"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_config_changes_account_level(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Account-level setting changes (setSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. Use for: account level configuration changes, account settings modified, what changed at the account level, setSetting events, account-wide config changes, who changed an account setting."
+        ]
+      },
+      {
+        "id": "2e8cfd2f909e47bfaac4d2673ddc4263",
+        "question": [
+          "detect_config_changes_high_priority"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_config_changes_high_priority(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Security-weakening configuration changes: verbose audit logging disabled, IP access list modifications, and Databricks employee access window changes. MITRE T1484. Audit logging disabled ranks CRITICAL because it blinds every other detection. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging."
+        ]
+      },
+      {
+        "id": "2f907b1ad8ea4618907c96741b0ad5c7",
+        "question": [
+          "detect_credential_scanner_activity"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_credential_scanner_activity(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Credential-scanning tools identified by user agent (TruffleHog and similar). MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Dual-use: your own security team may run these legitimately, so confirm whether the actor and timing were sanctioned before treating it as an incident. Use for: TruffleHog, credential scanning tools, secret scanners, who ran a credential scanner, scanning activity, security tool usage."
+        ]
+      },
+      {
+        "id": "317d3f5af5ad4652a327a69ec6748b0b",
+        "question": [
+          "detect_access_token_deleted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_access_token_deleted(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Personal access tokens revoked (revokeDbToken). Usually routine hygiene, but mass revocation can be destructive action, and revoking a token right after use can be cleanup. Use for: revoked tokens, deleted PATs, token revocation, who removed an access token, revokeDbToken."
+        ]
+      },
+      {
+        "id": "45ec72ac71b141eab3cad63a795407f8",
+        "question": [
+          "detect_user_account_deleted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_user_account_deleted(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "User accounts deleted. MITRE T1531 Account Access Removal. Mass deletion is destructive; deleting one account shortly after using it can be cleanup of an attacker-created identity. Use for: deleted user accounts, who removed a user, account deletion, offboarding events, removed identities."
+        ]
+      },
+      {
+        "id": "474d1e8bdc904ade8686ec42a17ef2a7",
+        "question": [
+          "detect_denied_ip_logon_attempts"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_denied_ip_logon_attempts(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Login and API attempts rejected by IP access lists (IpAccessDenied), aggregated per identity and source IP with the blocked endpoints. Use for: blocked login attempts, denied IP addresses, who was blocked by the allow list, access denied events, attempts from unauthorized IPs, brute force from blocked IPs, IpAccessDenied."
+        ]
+      },
+      {
+        "id": "50b942807e0e4934be42f4d9ee1a6ccb",
+        "question": [
+          "detect_data_movement_downloads"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_data_movement_downloads(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Data leaving the workspace via download or export, AGGREGATED per actor, action and day: downloadPreviewResults, downloadLargeResults, filesGet, getModelVersionDownloadUri, getModelVersionSignedDownloadUri, workspaceExport (excluding SOURCE format, which is normal source control) and downloadQueryResult (excluding arrows, which is UI rendering). MITRE T1567, TA0010 Exfiltration. Deliberately aggregated, not row-per-event: this is the highest-volume detection here (227,000+ filesGet events from 6 actors in one reference 90-day window), so per-event rows would be unreadable and would truncate. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, result downloads, data leaving the workspace, exfiltration via download, download volume by user."
+        ]
+      },
+      {
+        "id": "68fce1cbb2d6457cbc1093b359a6e739",
+        "question": [
+          "detect_ip_access_list_changes"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_ip_access_list_changes(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "IP access list creations, updates and deletions: which list, who, when, from where, with what client. MITRE T1484 Domain or Tenant Policy Modification. IMPORTANT: the audit log does NOT contain the CIDR/IP values for these events, so a before/after IP diff cannot be produced from audit data -- report the changelog and resolve ip_access_list_id against the IP Access Lists REST API for current CIDRs. Use for: who changed the IP allow list, IP access list history, was our allow list modified, who deleted an IP access list, IP allowlist changelog, network access control changes, allow list audit trail."
+        ]
+      },
+      {
+        "id": "6efd923e517c45dfb63ac6571a7cf34f",
+        "question": [
+          "detect_ip_acl_validation_failures"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_ip_acl_validation_failures(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Account-level IP ACL validation failures (accountIpAclsValidationFailed), aggregated per identity and rejected IP. Carries the offending IP, unlike the ACL mutation events. Many distinct IPs from one identity can indicate probing for an allowed range; a single repeated IP is usually a user outside the corporate network. Use for: failed IP access list checks, rejected IP addresses, who was blocked by the account IP ACL, IP ACL validation errors, accountIpAclsValidationFailed, access blocked by IP policy."
+        ]
+      },
+      {
+        "id": "6f0c7ad245c2428cb4da93f10a5962f7",
+        "question": [
+          "detect_config_changes_workspace_level"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_config_changes_workspace_level(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Every workspace-level configuration change (all workspaceConfEdit events) with the setting key and its new value. Broader than the high-priority function, which triages only the security-relevant subset -- use this one when you need a COMPLETE workspace config changelog. MITRE T1484 Domain or Tenant Policy Modification. Use for: all workspace configuration changes, complete config changelog, every setting that changed, workspace settings audit, what settings were modified, workspaceConfEdit."
+        ]
+      },
+      {
+        "id": "702f113459f3493eb1100c037851bc9f",
+        "question": [
+          "detect_user_account_created"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_user_account_created(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user."
+        ]
+      },
+      {
+        "id": "7108e5a5b7a84cf589d57743ca8a73ec",
+        "question": [
+          "detect_token_scanning_activity"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_token_scanning_activity(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Personal access tokens (authenticationMethod API_EXT_PAT_TOKEN) grouped by token, showing how many distinct source IPs presented each one. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials. A single token presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, token abuse, stolen access token, is a token compromised, token used from many IPs."
+        ]
+      },
+      {
+        "id": "72b93e6f4710409db8cd98b608b54ee6",
+        "question": [
+          "detect_workspace_admin_granted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_workspace_admin_granted(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  ''",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Workspace administrator privilege granted, directly (setAdmin) or by adding a principal to a workspace-admin group named in admin_groups. MITRE T1098, TA0004 Privilege Escalation. A workspace admin can read every notebook, alter every job, and change workspace security settings. Use for: who was made workspace admin, workspace admin grants, new admins on a workspace, setAdmin, privilege escalation in a workspace."
+        ]
+      },
+      {
+        "id": "7388582e8c8a434e99918bc54077a9e0",
+        "question": [
+          "detect_data_movement_sql_queries"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_data_movement_sql_queries(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "COPY INTO statements that supply credentials inline (statement_text contains both COPY INTO and CREDENTIALS), read from system.query.history. MITRE T1567 Exfiltration Over Web Service. Inline credentials bypass Unity Catalog governance and lineage, so this is data movement your UC grants did not mediate. WARNING: statement_text may contain live credential material -- redact before sharing. Requires SELECT on system.query.history. Use for: COPY INTO with credentials, data exfiltration via SQL, ungoverned data movement, queries using inline credentials, suspicious COPY INTO, bulk data export via SQL."
+        ]
+      },
+      {
+        "id": "7741ec19c778434a829c1c7a048465c2",
+        "question": [
+          "detect_databricks_employee_logon"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_databricks_employee_logon(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Databricks employee (support) logons into your workspace via GENIE_AUTH. Expected during an open support engagement and gated by the customer-approved access window; unexplained occurrences should be reconciled against your support tickets. Use for: Databricks employee access, support logins, did Databricks staff access our workspace, GENIE_AUTH, vendor access, third-party access to our workspace."
+        ]
+      },
+      {
+        "id": "8716683dbb5d41178b10aecf73e0b0ba",
+        "question": [
+          "detect_data_movement_explicit_creds"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_data_movement_explicit_creds(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Creation or modification of external storage mounts, storage credentials, and external connections (mount, createStorageCredential, updateStorageCredential, createConnection, updateConnection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external connections created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
+        ]
+      },
+      {
+        "id": "8b36f49bb14d46fc9925c8681c7d75b4",
+        "question": [
+          "detect_verbose_audit_logging_disabled"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_verbose_audit_logging_disabled(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Changes to the enableVerboseAuditLogs workspace setting, both disables and re-enables. MITRE T1562.008 Impair Defenses: Disable Cloud Logs, TA0005 Defense Evasion. RUN THIS FIRST IN ANY INVESTIGATION: while verbose logging is off, workspaceConfEdit and notebook-level actions may never be recorded, so every other detection has a blind spot for that period and any absence of evidence afterwards is uninterpretable. Both directions are returned so the gap can be bounded at both ends. Use for: was audit logging disabled, verbose audit logging, who turned off logging, defense evasion, log tampering, audit gap, is my audit trail complete."
+        ]
+      },
+      {
+        "id": "980eff183dc2478291894cb18b639889",
+        "question": [
+          "detect_account_admin_granted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_account_admin_granted(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  ''",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Account administrator privilege granted, both directly (setAccountAdmin, changeAccountOwner) and indirectly by adding a principal to an admin group named in admin_groups. MITRE T1098 Account Manipulation, TA0004 Privilege Escalation. Account admin is the highest privilege in a Databricks account. Use for: who was made account admin, account admin grants, privilege escalation, new administrators, setAccountAdmin, changeAccountOwner, who granted admin rights, admin group membership changes."
+        ]
+      },
+      {
+        "id": "9e4a0f5e60cc4ba08f47082d235ce108",
+        "question": [
+          "detect_sso_config_changed"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_sso_config_changed(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Single sign-on / identity provider configuration changed. MITRE T1556 Modify Authentication Process, T1484 Domain or Tenant Policy Modification. Repointing SSO at an attacker-controlled IdP, or disabling it, subverts authentication for every user at once -- among the highest-impact changes in the account. Use for: SSO changes, identity provider changed, SAML configuration, who changed SSO settings, authentication configuration changes, IdP modified."
+        ]
+      },
+      {
+        "id": "a53d49e4d1b6436e8e79cfd0f139deb7",
+        "question": [
+          "detect_group_changes"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_group_changes(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Group creation, deletion and membership changes (createGroup, removeGroup, addPrincipalToGroup, addPrincipalsToGroup, removePrincipalFromGroup). MITRE T1098 Account Manipulation. Groups carry entitlements and UC grants, so adding a principal to the right group is privilege escalation without ever touching an admin flag -- cross-check group_name against your admin and data-access groups. Use for: group changes, who was added to a group, group membership, new groups created, deleted groups, who joined an admin group, addPrincipalToGroup, group audit."
+        ]
+      },
+      {
+        "id": "b00ed193bd094b5299396ed9550c5004",
+        "question": [
+          "detect_user_account_changed"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_user_account_changed(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "User account attributes modified (updateUser) -- entitlements, active status, display name, roles. MITRE T1098 Account Manipulation. Re-enabling a disabled account or adding an entitlement is a quieter escalation path than granting admin outright. Use for: user account changes, modified users, entitlement changes, who changed a user account, updateUser, account attribute modification, reactivated accounts."
+        ]
+      },
+      {
+        "id": "b1a7b375cd9346f0aea9317df2c15de7",
+        "question": [
+          "detect_access_token_created"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_access_token_created(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime."
+        ]
+      },
+      {
+        "id": "c87ab03969c8401787fdb5a6c7b8acdc",
+        "question": [
+          "detect_user_role_modified"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_user_role_modified(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Role assignments changed for a principal (roleAssignment / updateRoleAssignment endpoints). MITRE T1098, TA0004 Privilege Escalation. Use for: role changes, who changed a role, role assignment, permission role modified, entitlement grants."
+        ]
+      },
+      {
+        "id": "d69a5a62468e499995f5087a748b01cb",
+        "question": [
+          "detect_secrets_discovery"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_secrets_discovery(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  5",
+          ",\n  5",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Secret discovery behaviour: an identity that both enumerates secret scopes (listScopes) and reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
+        ]
+      },
+      {
+        "id": "db36fe43e39643969848124f471dfe10",
+        "question": [
+          "detect_mfa_key_changes"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_mfa_key_changes(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "MFA keys added or removed (mfaAddKey, mfaDeleteKey). MITRE T1556 Modify Authentication Process. Removing MFA weakens an account; ADDING an attacker-controlled key to a compromised account is a persistence mechanism that survives a password reset. Use for: MFA changes, who removed MFA, new MFA device registered, multi-factor authentication changes, mfaAddKey, mfaDeleteKey, authentication weakened."
+        ]
+      },
+      {
+        "id": "eedb89c7032a4432a36b332f88f751b1",
+        "question": [
+          "detect_metastore_admin_granted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_metastore_admin_granted(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  ''",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Metastore administrator or owner changed (updateMetastore with an owner set), plus membership adds to metastore-admin groups named in admin_groups. MITRE T1098, TA0004 Privilege Escalation. A metastore admin controls Unity Catalog governance for every workspace sharing that metastore. Use for: who became metastore admin, metastore owner changed, Unity Catalog admin grants, updateMetastore, UC privilege escalation."
+        ]
+      },
+      {
+        "id": "f16fbc24a2874ac09bd9049861451e51",
+        "question": [
+          "detect_session_multi_ip_logins"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_session_multi_ip_logins(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  5",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Identities that logged in from several distinct PUBLIC IP addresses within the window. MITRE T1078 Valid Accounts, T1550 Use Alternate Authentication Material. Private (RFC1918) IPs and known Databricks service user agents are excluded, because both legitimately appear from many hosts. Travel, VPN switching and mobile networks are common benign explanations -- geographic impossibility is the discriminator, and that needs IP geolocation this function does not do. Use for: session hijacking, logins from multiple IPs, impossible travel, account sharing, suspicious login locations, compromised credentials, one user many locations."
+        ]
+      },
+      {
+        "id": "fab3c6057247434ab20b1b2160ef8e68",
+        "question": [
+          "detect_user_password_changed"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_user_password_changed(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Passwords changed (changePassword). MITRE T1098. An admin changing ANOTHER user account password is account takeover; compare actor to target_user. Use for: password changes, who reset a password, changePassword, credential changes, password resets."
+        ]
+      },
+      {
+        "id": "fb9fa67d5c3c4b85bf60f0c59b897602",
+        "question": [
+          "detect_session_high_count_per_ip"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_session_high_count_per_ip(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          ",\n  5",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Public source IPs producing an unusually high number of distinct sessions, with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs and Databricks service agents are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse."
+        ]
+      }
+    ]
+  }
+}

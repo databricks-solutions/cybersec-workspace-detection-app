@@ -30,8 +30,15 @@
 --                                      settingKeyName, settingValueForAudit,
 --                                      settingKeyTypeName
 --
--- Install:
---   USE CATALOG <your_catalog>; USE SCHEMA security_detections;
+-- INSTALL: use genie-agent/deploy/install.py, which qualifies and runs everything.
+-- If pasting by hand, find-and-replace the placeholders FIRST:
+--     ${CATALOG} -> your UC catalog     ${SCHEMA} -> security_detections
+--
+-- Do NOT rely on a leading `USE CATALOG` instead. A bare `CREATE FUNCTION x`
+-- lands in whatever catalog the session defaults to -- often hive_metastore --
+-- and a function there cannot reference the Unity Catalog table
+-- system.access.audit. It fails with UC_COMMAND_NOT_SUPPORTED, which does not
+-- mention the session catalog, so the cause is not obvious from the error.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -67,7 +74,7 @@
 -- though IP ACLs also exist at account scope. Filtering
 -- audit_level='ACCOUNT_LEVEL' here returns zero rows.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION detect_ip_access_list_changes(
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_ip_access_list_changes(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
@@ -124,7 +131,7 @@ RETURN
 -- ACL. Adversarial cause: probing from many IPs to find one that passes. Volume
 -- and IP spread separate the two.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION detect_ip_acl_validation_failures(
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_ip_acl_validation_failures(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
@@ -159,7 +166,7 @@ RETURN
 -- severity ladder. workspaceConfEdit's keys (workspaceConfKeys /
 -- workspaceConfValues) were verified live and match the notebook.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION detect_config_changes_high_priority(
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_config_changes_high_priority(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
@@ -237,7 +244,7 @@ RETURN
 -- ACCOUNT_LEVEL vs 25 WORKSPACE_LEVEL in 90 days) and this function is the
 -- account-scope one.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION detect_config_changes_account_level(
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_config_changes_account_level(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
@@ -284,7 +291,7 @@ RETURN
 -- to confirm when a change actually took effect -- and since the audit log has no
 -- CIDR values, this is one of the few ways to see the EFFECT of the change.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION detect_denied_ip_logon_attempts(
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_denied_ip_logon_attempts(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )

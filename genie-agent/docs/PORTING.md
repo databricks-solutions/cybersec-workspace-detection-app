@@ -1,7 +1,8 @@
 # Porting detections to Genie Agent trusted functions
 
-Status of the 34 detections in [`../../base/detections/`](../../base/detections/),
-and how to port the rest.
+How all 34 detections in [`../../base/detections/`](../../base/detections/) were
+ported to Unity Catalog SQL functions, the deliberate deviations, and the traps
+found along the way.
 
 ## Why it's a hand port, not a transpiler
 
@@ -28,44 +29,52 @@ That last line is the important one. `lib/common.py` (586 LOC) carries pandas
 UDFs and MaxMind GeoIP enrichment that SQL cannot express — but **no current
 detection calls them**, so all 34 are SQL-portable today.
 
-## Ported
+## Ported: all 34
 
-| Detection | Function | Source |
+| File | Functions | Detections covered |
 |---|---|---|
-| Configuration Changes (High Priority) | `detect_config_changes_high_priority` | `event-based/configuration_changes_high_priority.py` |
-| Configuration Changes (Account Level) | `detect_config_changes_account_level` | `event-based/configuration_changes_account_level.py` |
-| Attempted Logon from Denied IP | `detect_denied_ip_logon_attempts` | `event-based/attempted_logon_from_denied_ip.py` |
-| IP access list changes **+ diff** | `detect_ip_access_list_changes` | extracted from high-priority, extended |
-| IP ACL validation failures | `detect_ip_acl_validation_failures` | **new — no notebook covers this** |
+| `01_ip_access_and_config.sql` | 5 | IP access lists, high-priority + account-level config, denied logons |
+| `02_identity_and_access.sql` | 15 | tokens, admin grants (account/workspace/metastore), user lifecycle, roles, passwords, MFA, groups, non-SSO + employee logon, SSO config |
+| `03_data_movement_and_secrets.sql` | 7 | storage credentials, COPY INTO, downloads, secrets discovery, credential scanners, token scanning, admin SQL spike |
+| `04_sessions_and_config.sql` | 5 | session hijacking ×3, verbose-audit-logging evasion, workspace config |
 
-The IR set first, because that is what an active investigation needs.
+**32 functions for 34 detections.** Four near-identical notebooks were merged into
+two, deliberately: `mfa_key_added` + `mfa_key_deleted` → `detect_mfa_key_changes`,
+and `group_created` + `group_deleted` + `principal_added_to_group` +
+`principal_removed_from_group` → `detect_group_changes`. Genie selects better from
+one well-described function than from several near-duplicates, and both directions
+of a change answer the same investigative question ("did group membership change
+for this principal?").
 
-## Not yet ported
+Verified on a live workspace: 32/32 installed, 32/32 executed without error, 19
+returning data and 13 legitimately empty because those events do not occur in
+that account.
 
-The remaining 29, grouped by porting difficulty:
+### Deliberate deviations from the source notebooks
 
-**Straightforward** — single filter + project, same pattern as the ported ones.
-Most event-based detections: `sso_config_changed`, `verbose_audit_logging_disabled`,
-`user_admin_account_change`, `trufflehog_scan_detected`,
-`configuration_changes_workspace_level`, the privileged-role-assignment pair,
-`databricks_employee_logon`.
+**`detect_admin_sql_activity_spike`** reports a per-actor-per-day COUNT above a
+threshold, not the notebook's normalised RATE. A stateless SQL function has no
+baseline window to normalise against, and inventing one would misrepresent the
+result. The investigative question — "who suddenly started issuing account DDL?" —
+is answered either way.
 
-**Needs care** — uses window functions or aggregation, which SQL supports but
-where semantics must be checked against the PySpark original rather than
-translated line by line:
+**`detect_token_scanning_activity`** drops the notebook's optional MaxMind geo
+enrichment, which needs an `.mmdb` file on the cluster and cannot be expressed in
+SQL. The load-bearing signal (one token presenting from many distinct IPs) is
+intact; only the city/country columns are gone.
 
-- `behavioral/spike_in_table_admin_activity.py`
-- `behavioral/session_hijacking_multi_device.py`
-- `behavioral/session_hijacking_frequent_logins.py`
-- `behavioral/session_hijacking_session_count.py`
-- `behavioral/token_scanning_activity.py`
-- `behavioral/secret_scanning_activity.py`
+**`detect_data_movement_downloads`** aggregates per actor/action/day rather than
+returning one row per event. Discovered by running it: the un-aggregated form
+returned **242,738 rows from 6 actors** in a 90-day window, which would truncate
+in any agent answer and tell an analyst nothing. Aggregated it returns 199 rows
+with the same total.
 
-**Check for cross-run state first.** Any detection that assumes "compared to the
-previous run" is a Workflow property, not a function property. A function is
-stateless per call, so such logic needs either a materialized table or an
-explicit baseline window as a parameter. Audit before porting — do not assume a
-window function is self-contained.
+**Environment-specific allowlists are NOT baked in.** `access_token_created` in
+the notebook excludes one account's known job (`user_agent ~ 'linux auth'`, source
+IP `52.9.53.2`). Shipping that would silently hide real tokens in every other
+account, so the columns are returned and the caller filters. The session
+detections' RFC1918 and Databricks-service-agent exclusions ARE kept, because
+those are structural rather than account-specific.
 
 ## How to port one
 
