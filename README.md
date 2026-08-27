@@ -35,7 +35,9 @@ instead of opening a notebook and editing widget parameters.
 
 1. **Workspace → Create → Git folder** → this repo's URL
 2. Open **`genie-agent/deploy/install_notebook`**
-3. Fill in the catalog widget, attach any cluster, **Run all**
+3. Attach compute (**Serverless works**), fill in the **catalog** widget, **Run all**
+
+The last cell prints your agent's URL.
 
 That installs all 35 detections as Unity Catalog SQL functions and creates the
 agent. A CLI installer (`genie-agent/deploy/install.py`) is also provided for

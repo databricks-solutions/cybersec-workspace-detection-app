@@ -114,15 +114,23 @@ written. Turn verbose audit logging back on before relying on this agent.
 **Recommended: run the install notebook from a Git folder.** No Databricks CLI, no
 local Python, nothing cloned to your laptop.
 
+
 1. **Workspace → Create → Git folder** →
    `https://github.com/databricks-solutions/cybersec-workspace-detection-app`
+   (Git provider: GitHub. Leave *Sparse checkout* unchecked — the notebook needs
+   `genie-agent/functions/` and `genie-agent/agent/` to be present.)
 2. Open **`genie-agent/deploy/install_notebook`** from inside that Git folder
-3. Attach any cluster (serverless is fine) and fill in the widgets:
+3. Attach compute. **Serverless works** — that is the simplest choice.
+4. Fill in the widgets:
    - **catalog** — a catalog your security team owns *(required)*
    - **schema** — defaults to `security_detections`
-   - **warehouse_id** — only if you want the agent created for you; leave blank to
-     install functions only
-4. **Run all**
+   - **warehouse_id** — the SQL warehouse the *agent* will query through. Leave
+     blank to install functions only and wire the agent up later.
+   - **space_id** — leave blank to create a new agent; set it to update an
+     existing one instead of creating a duplicate
+5. **Run all**
+
+The last cell prints the agent's URL. Open it and ask a question.
 
 The notebook finds the SQL files from its own path, so nothing is hardcoded and it
 works wherever you put the Git folder. It also checks your audit visibility

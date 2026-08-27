@@ -15,8 +15,10 @@
 # MAGIC 1. **Add this repo as a Git folder**
 # MAGIC    Workspace → Create → Git folder →
 # MAGIC    `https://github.com/databricks-solutions/cybersec-workspace-detection-app`
-# MAGIC 2. **Open this notebook from inside that Git folder** and attach any cluster
-# MAGIC    (serverless is fine).
+# MAGIC    Leave *Sparse checkout* unchecked — this notebook reads sibling files from
+# MAGIC    `genie-agent/functions/` and `genie-agent/agent/`.
+# MAGIC 2. **Open this notebook from inside that Git folder.** Attach compute —
+# MAGIC    **Serverless works** and is the simplest choice.
 # MAGIC 3. **Fill in the widgets** at the top: catalog, schema, and — only if you
 # MAGIC    want the agent created for you — a SQL warehouse id.
 # MAGIC
