@@ -169,7 +169,7 @@ there cannot reference the Unity Catalog table `system.access.audit`. It fails w
 The notebook does this for you (step 4 of the notebook). Manually:
 
 ```sql
-SHOW USER FUNCTIONS IN main.security_detections;   -- expect 33
+SHOW USER FUNCTIONS IN main.security_detections;   -- expect 34
 
 SELECT * FROM main.security_detections.detect_config_changes_high_priority(
   current_timestamp() - INTERVAL 90 DAYS, current_timestamp())
@@ -220,7 +220,7 @@ to the function's `Use for:` list, or add an Example SQL Query.
 
 ## 6. Questions you can ask
 
-**33 functions covering all 35 detections in this repo.** By theme:
+**34 functions covering the detections in this repo.** By theme:
 
 **IP access & network** — who changed the IP allow list; who deleted a list;
 failed attempts to change IP rules; who was blocked and what they were reaching
@@ -241,6 +241,11 @@ access; SSO/IdP configuration changes.
 `COPY INTO` with inline credentials; download and export volume per user; bulk
 notebook export scored against each principal's own history (source-code
 exfiltration).
+
+**Execution & obfuscation** — SQL or notebook/job commands that decode a hex or
+base64 payload at runtime (`UNHEX`, `xxd -r`, `base64 -d | bash`) to hide an
+executed command — the obfuscation technique seen in Databricks pen tests. Reads
+both query history and job/notebook command events.
 
 **Secrets** — identities that enumerate secret scopes *and* read many distinct
 secrets (the discovery pattern, not just normal reads).
@@ -374,7 +379,7 @@ Layout:
 
 ```
 genie-agent/
-├── functions/     33 UC SQL functions (4 themed files)
+├── functions/     34 UC SQL functions (4 themed files)
 ├── agent/         instructions, example questions, serialized_space template
 ├── deploy/        install_notebook (recommended) + install.py (CLI fallback)
 ├── tools/         metadata extractor
@@ -397,19 +402,26 @@ python genie-agent/tools/extract_detection_metadata.py --repo-root . \
 
 Exits non-zero if a notebook fails to parse, so CI catches silent under-coverage.
 
-**Verification status.** All 33 functions were installed and executed against a
-live workspace (SFE, 90-day window, 2026-08-26): 33/33 created, 33/33 executed
-without error, 19 returning data and 14 legitimately empty. Every
-`request_params` key is verified against live data rather than the REST API docs —
-they differ, and a wrong key returns NULL rather than erroring. Keys are listed at
-the top of each SQL file.
+**Verification status.** The original 33 functions were installed and executed
+against a live Databricks production workspace (90-day window, 2026-08-26): 33/33
+created, 33/33 executed without error, 19 returning data and 14 legitimately
+empty. The 34th, `detect_encoded_command_execution`, was added later (port of
+PR #10) and validated live on 2026-09-03: both source branches execute, the
+dual-source schema is correct, and the filter was proven to fire on known
+UNHEX/xxd/base64/printf payloads while rejecting benign hex ids, `sha2`, bare
+`printf` and `mkdir -p`. Every `request_params` key is verified against live data
+rather than the REST API docs — they differ, and a wrong key returns NULL rather
+than erroring. Keys are listed at the top of each SQL file.
 
-**Coverage: 35/35 detections in 33 functions.** Fewer functions than detections
-because four near-identical notebooks were merged into two: `mfa_key_added` +
-`mfa_key_deleted` → `detect_mfa_key_changes`, and the four group notebooks →
-`detect_group_changes`. Genie selects better from one well-described function than
-from several near-duplicates, and both directions of a change answer the same
-investigative question.
+**Coverage: 34 functions.** 33 cover the 35 detections in this repo — fewer
+functions than detections because four near-identical notebooks were merged into
+two: `mfa_key_added` + `mfa_key_deleted` → `detect_mfa_key_changes`, and the four
+group notebooks → `detect_group_changes`. Genie selects better from one
+well-described function than from several near-duplicates, and both directions of
+a change answer the same investigative question. The 34th,
+`detect_encoded_command_execution`, pairs with David Veuve's PR #10 (which adds
+the scheduled-notebook counterpart under `base/detections/behavioral/`): install
+the function now, and the two land together when #10 merges.
 
 **Two deliberate deviations from the notebooks**, both documented inline:
 `detect_admin_sql_activity_spike` reports a threshold count rather than the
