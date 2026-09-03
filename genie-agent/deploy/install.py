@@ -1,7 +1,7 @@
 """One-command installer for the Security Detections Genie Agent.
 
 Creates the schema, installs every SQL function, and creates (or updates) the
-Genie Agent with all 32 functions registered as example queries.
+Genie Agent with all 34 functions registered as example queries.
 
     python genie-agent/deploy/install.py \
         --profile <cli-profile> \
@@ -15,9 +15,9 @@ WHY A SCRIPT AND NOT A DAB BUNDLE. Databricks Asset Bundles do support a
 ``genie_spaces`` resource, and that is the right long-term home. It is not used
 here for one concrete reason: the agent's whole configuration is a single opaque
 ``serialized_space`` JSON string, and the substitutions this install needs
-(catalog and schema, in 32 places, INSIDE that string) are not something bundle
-variable interpolation reaches -- it substitutes in YAML, not within an embedded
-JSON payload. Doing it in a bundle would mean committing a pre-rendered
+(catalog and schema, in dozens of places, INSIDE that string) are not something
+bundle variable interpolation reaches -- it substitutes in YAML, not within an
+embedded JSON payload. Doing it in a bundle would mean committing a pre-rendered
 serialized_space per customer, which is worse than rendering it here. Revisit if
 bundles gain templating inside resource payloads.
 

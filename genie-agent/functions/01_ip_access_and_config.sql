@@ -16,7 +16,7 @@
 -- is not decoration -- it is what Genie matches a question against.
 --
 -- ALL request_params KEYS BELOW WERE VERIFIED AGAINST LIVE AUDIT DATA
--- (SFE workspace, 90-day window, 2026-08-26). Do not "tidy" them to the names
+-- (a Databricks production workspace, 90-day window, 2026-08-26). Do not "tidy" them to the names
 -- the REST API documentation uses -- the audit log does NOT use those names, and
 -- a wrong key yields NULL rather than an error. See the note on
 -- detect_ip_access_list_changes for the one that matters most.

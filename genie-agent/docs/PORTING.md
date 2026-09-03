@@ -35,10 +35,12 @@ detection calls them**, so all 34 are SQL-portable today.
 |---|---|---|
 | `01_ip_access_and_config.sql` | 5 | IP access lists, high-priority + account-level config, denied logons |
 | `02_identity_and_access.sql` | 15 | tokens, admin grants (account/workspace/metastore), user lifecycle, roles, passwords, MFA, groups, non-SSO + employee logon, SSO config |
-| `03_data_movement_and_secrets.sql` | 8 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike |
+| `03_data_movement_and_secrets.sql` | 9 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike, encoded command execution |
 | `04_sessions_and_config.sql` | 5 | session hijacking ×3, verbose-audit-logging evasion, workspace config |
 
-**33 functions for 35 detections.** Four near-identical notebooks were merged into
+**34 functions.** 33 cover the 35 detections in this repo; the 34th,
+`detect_encoded_command_execution`, ports David Veuve's PR #10 and lands with it
+(that PR adds the scheduled-notebook counterpart under `base/detections/`). Four near-identical notebooks were merged into
 two, deliberately: `mfa_key_added` + `mfa_key_deleted` → `detect_mfa_key_changes`,
 and `group_created` + `group_deleted` + `principal_added_to_group` +
 `principal_removed_from_group` → `detect_group_changes`. Genie selects better from
@@ -104,7 +106,7 @@ account-scoped.
 **`request_params` keys do NOT match the REST API field names.** Verify every key
 against live data before shipping a function — a wrong key returns NULL, not an
 error, so the function looks like it works while silently answering nothing.
-Verified keys (SFE workspace, 90-day window, 2026-08-26):
+Verified keys (a Databricks production workspace, 90-day window, 2026-08-26):
 
 | action | keys |
 |---|---|
@@ -138,6 +140,25 @@ line number, nothing pointing at the CTE. The identical query runs fine
 standalone, which makes it look like a permissions or transport problem rather
 than a syntax one. Cost real time on `detect_bulk_notebook_export`; the wrap is
 commented in place so nobody "tidies" it away.
+
+**A PySpark `r"\b"` regex SILENTLY breaks when ported into a Spark SQL string
+literal.** The `encoded_command_execution` port (PR #10) matches `base64 -d|bash`
+with `rlike(r"(--decode|-d)\b")` and pipe-to-shell with `r"\|\s*(ba)?sh\b"`. In
+PySpark the `r"..."` preserves the backslash, so Java regex sees a word boundary.
+Dropped verbatim into a SQL `RLIKE '...'` it breaks: the SQL string-literal parser
+consumes `\b` as a backspace character *before* the regex engine ever sees it, so
+the word boundary is gone and `base64 -d|bash` stops matching — the same
+"looks-fine, matches-nothing" failure as a wrong `request_params` key. Verified
+live (2026-09-03):
+
+```
+'base64 -d|bash' RLIKE '(--decode|-d)\b'   -> false   (backspace)
+'base64 -d|bash' RLIKE '(--decode|-d)\\b'  -> true    (word boundary)
+```
+
+Double every backslash (`\\b`, `\\|`, `\\s`) in a ported regex, and prove it
+fires against a known payload rather than trusting a clean install — a regex that
+matches nothing installs without error.
 
 **A correlated `IN (SELECT explode(...))` creates on a SQL warehouse but FAILS in a
 UDF body on DBR.** The three admin-grant functions used
