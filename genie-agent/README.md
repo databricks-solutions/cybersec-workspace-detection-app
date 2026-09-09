@@ -204,6 +204,23 @@ to the function's `Use for:` list, or add an Example SQL Query.
 
 ## 6. Questions you can ask
 
+**Two ways to ask — pick by what you have in hand:**
+
+| | **Answer mode** | **Investigation mode** |
+|---|---|---|
+| Use when | you have a **specific question** | you have an **open goal** and don't yet know where to look |
+| You ask | *"Who created personal access tokens last week?"* | *"Were we compromised in the last 90 days?"* · *"Who looks most suspicious?"* |
+| You get | one trusted query → one answer | a short multi-turn loop: visibility → triage → pivot on the lead → verdict |
+| Best for | checking a known fact fast | finding the lead and walking the thread |
+
+**Recommendation:** start in **answer mode** for anything specific — it is faster
+and more precise. Reach for **investigation mode** when you don't yet know who or
+what to look at, or during an active incident when you need the agent to *find* the
+lead rather than confirm one. You don't switch anything — the agent picks the mode
+from how you phrase the request; the two sections below are the examples for each.
+
+### Answer mode — a specific question
+
 **33 functions covering all 35 detections in this repo.** By theme:
 
 **IP access & network** — who changed the IP allow list; who deleted a list;
@@ -241,7 +258,19 @@ changelog, and account-level settings with their new values.
 which changes came from automation rather than the console (`user_agent`
 distinguishes Terraform/CLI/SDK from a person clicking).
 
-More in [`agent/example_questions.md`](agent/example_questions.md).
+More answer-mode examples in [`agent/example_questions.md`](agent/example_questions.md).
+
+### Investigation mode — an open goal
+
+Give the agent an open goal (*"investigate whether we were compromised in the last
+90 days"*, *"who looks most suspicious?"*) and it runs a goal-directed loop:
+establish audit visibility first, run a triage that ranks actors by the **breadth**
+of security-sensitive activity they touched (so the lead surfaces instead of
+drowning in login volume), pivot onto that lead, and end with a confidence-qualified
+verdict that names the plausible benign explanation. Because Genie answers **one
+query per turn**, drive it as a short sequence of prompts (kick off → triage →
+pivot → verdict) — the full playbook with the exact step prompts is in
+[`agent/example_questions.md`](agent/example_questions.md).
 
 **Expect some functions to return nothing**, and read that carefully. In one
 reference account 19 of 33 returned data and 14 were empty — because those events
@@ -358,7 +387,7 @@ Layout:
 
 ```
 genie-agent/
-├── functions/     33 UC SQL functions (4 themed files)
+├── functions/     34 SQL queries in 5 files: 33 detections + 1 investigation-triage helper
 ├── agent/         instructions, example questions, serialized_space template
 ├── deploy/        install_notebook (recommended) + install.py (CLI fallback)
 ├── tools/         metadata extractor
@@ -396,6 +425,14 @@ because four near-identical notebooks were merged into two: `mfa_key_added` +
 `detect_group_changes`. Genie selects better from one well-described function than
 from several near-duplicates, and both directions of a change answer the same
 investigative question.
+
+**Plus one investigation-triage helper** (`detect_investigation_triage`,
+`functions/00_investigation_triage.sql`) — *not* a detection, but the entry point
+for investigation mode. It ranks actors and their source IPs by the breadth of
+distinct security-sensitive action types they touched (excluding routine logins),
+so the lead surfaces at the top of a small result instead of the analyst having to
+sweep every family by hand. Its sensitive-action set is the union of the action
+names the detections already treat as security-relevant.
 
 **Two deliberate deviations from the notebooks**, both documented inline:
 `detect_admin_sql_activity_spike` reports a threshold count rather than the

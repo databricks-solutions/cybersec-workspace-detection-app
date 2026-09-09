@@ -46,10 +46,30 @@ calls them**, so all are SQL-portable today.
 
 | File | Functions | Detections covered |
 |---|---|---|
+| `00_investigation_triage.sql` | 1 | *not a detection* — the investigation-mode entry point (see below) |
 | `01_ip_access_and_config.sql` | 5 | IP access lists, high-priority + account-level config, denied logons |
 | `02_identity_and_access.sql` | 15 | tokens, admin grants (account/workspace/metastore), user lifecycle, roles, passwords, MFA, groups, non-SSO + employee logon, SSO config |
 | `03_data_movement_and_secrets.sql` | 8 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike |
 | `04_sessions_and_config.sql` | 5 | session hijacking ×3, verbose-audit-logging evasion, workspace config |
+
+### The investigation-triage asset (not a detection)
+
+`00_investigation_triage.sql` (`detect_investigation_triage`) is the entry point
+for **investigation mode**, not a ported detection. A Genie space answers one query
+per turn, so an open-ended investigation must play out across turns; the load-bearing
+first step is picking the lead. Ad-hoc, the model tends to either UNION every family
+into one query (which truncates to a sample and buries the signal) or rank by raw
+event volume (which floats a busy service principal to the top). This asset makes
+that step deterministic: it ranks actors and their source IPs by the count of
+**distinct** security-sensitive action types they touched — breadth across families
+first, then failed attempts, then volume — because an incident's signature is one
+identity touching several *rare, high-severity* action types (an IP-ACL burst is
+low-volume but high-signal). Its sensitive-action set is the union of the action
+names the detections already treat as security-relevant; routine authentication
+(`login`/`tokenLogin`/`samlLogin`/`jwtLogin`/`mfaLogin`/`certLogin`) is deliberately
+excluded because it is high-volume and would dominate the ranking (the non-SSO /
+employee-logon detections cover authentication specifically). See
+`agent/instructions.md` for the loop it anchors.
 
 Some near-identical notebooks were merged deliberately: `mfa_key_added` +
 `mfa_key_deleted` → `detect_mfa_key_changes`, and the four group notebooks →
