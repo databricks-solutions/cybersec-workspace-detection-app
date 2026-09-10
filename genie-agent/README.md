@@ -272,6 +272,14 @@ query per turn**, drive it as a short sequence of prompts (kick off → triage �
 pivot → verdict) — the full playbook with the exact step prompts is in
 [`agent/example_questions.md`](agent/example_questions.md).
 
+Triage is a **per-actor breadth lens, not a universal attack-finder.** It surfaces
+one identity that touched many sensitive controls — a rogue admin, a broad
+credential misuse. A campaign spread across *many* accounts that each do a little
+(credential stuffing, distributed mass export, token replay) will **not** top this
+ranking, because no single account has the breadth; that shape shows up in **IP or
+token concentration** instead. For an incident that looks distributed, pivot on the
+shared IP/token, not on any single actor.
+
 **Expect some functions to return nothing**, and read that carefully. In one
 reference account 19 of 33 returned data and 14 were empty — because those events
 simply do not occur there, not because the function is broken. See

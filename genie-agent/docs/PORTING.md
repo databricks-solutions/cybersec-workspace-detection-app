@@ -68,7 +68,16 @@ low-volume but high-signal). Its sensitive-action set is the union of the action
 names the detections already treat as security-relevant; routine authentication
 (`login`/`tokenLogin`/`samlLogin`/`jwtLogin`/`mfaLogin`/`certLogin`) is deliberately
 excluded because it is high-volume and would dominate the ranking (the non-SSO /
-employee-logon detections cover authentication specifically). See
+employee-logon detections cover authentication specifically).
+
+**Its blind spot, by construction:** because it ranks *per actor*, a campaign
+distributed across many identities that each touch only a little — credential
+stuffing, mass token replay, distributed export from a shared IP pool — will not
+top it, since no single identity has the breadth. A single high-breadth *benign*
+actor (e.g. an admin running an IP-ACL migration across several controls) can even
+outrank it. That distributed shape surfaces in IP/token concentration, not
+per-actor breadth, which is why the pivot step ranks on the shared IP/token for
+that case. Triage is one lens, not the whole investigation. See
 `agent/instructions.md` for the loop it anchors.
 
 Some near-identical notebooks were merged deliberately: `mfa_key_added` +

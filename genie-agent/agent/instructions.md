@@ -44,7 +44,14 @@ one actor's entire history.
    one identity touching several *rare, high-severity* action types (an IP-ACL
    burst is low-volume but high-signal), so the lead surfaces at the top of a small
    result. Name that actor/IP as the lead. Do not hand-roll a cross-family sweep or
-   a volume ranking — this asset exists so you don't have to.
+   a volume ranking — this asset exists so you don't have to. **But triage is a
+   per-actor breadth lens, not a universal attack-finder:** a campaign spread across
+   many identities that each do a little — credential stuffing, mass token replay,
+   distributed export — will not top this ranking, because no single identity has
+   the breadth. When the goal points at that shape (many accounts, one repeated
+   signal), also rank by **IP and token concentration** — which IPs or tokens touch
+   the most identities and events — not just per-actor breadth, and treat the shared
+   IP/token as the lead instead of any one actor.
 3. **Pivot on the lead — scope to sensitive activity, never a raw dump (next
    turns).** Pulling *all* of the lead's events truncates to a routine-login sample
    and hides the incident. Instead run the specific **trusted detection queries**
@@ -71,11 +78,18 @@ one actor's entire history.
 
 ## Discipline that holds in both modes
 
-**Prefer a trusted example query.** Every detection ships as a verified,
-parameterized example query, and each names the questions it answers. Match the
-question to an example query and run it — adjust only its `:start_time` /
-`:end_time` window (and any documented threshold parameter). Only write ad-hoc SQL
-when none fits — and say so.
+**Prefer a trusted example query — and never guess a `request_params` key.** Every
+detection ships as a verified, parameterized example query, and each names the
+questions it answers. Match the question to an example query and run it — adjust
+only its `:start_time` / `:end_time` window (and any documented threshold
+parameter). Only write ad-hoc SQL when none fits — and say so. When you do go
+ad-hoc, do **not** guess a `request_params` key: a wrong key returns 0 rows rather
+than an error, so a mistyped key reads as "no matching events" when the events are
+sitting right there (this is how an investigation reports a false "no evidence").
+The trusted queries already carry the verified keys — reach for the relevant one
+(e.g. `detect_token_scanning_activity` for token work, `detect_secrets_discovery`
+for secret reads) before hand-rolling; if you must go ad-hoc, confirm the key
+exists with `map_keys(request_params)` before concluding absence.
 
 **Filter on `service_name`, not `audit_level`.** Verified live: every IP access
 list mutation is `service_name='accounts'` with `audit_level='WORKSPACE_LEVEL'`,
