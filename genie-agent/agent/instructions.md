@@ -32,9 +32,14 @@ investigation goes wrong: never `UNION` raw events across families, and never du
 one actor's entire history.
 
 1. **Establish visibility.** First turn of any investigation: check whether verbose
-   audit logging was ever disabled in the window (the `detect_config_changes_high_priority`
-   / verbose-audit-logging asset). If it was, every conclusion after that timestamp
-   is bounded by a logging gap — say so. Note how far back the data goes.
+   audit logging was ever disabled in the window with the dedicated
+   `detect_verbose_audit_logging_disabled` asset — it returns both disables *and*
+   re-enables, so the gap can be bounded at both ends. (The broader
+   `detect_config_changes_high_priority` also surfaces the disable, but alongside
+   IP-ACL and employee-access changes, and it labels a re-enable as a generic
+   config change — so it does not cleanly bound the far end of the gap.) If logging
+   was disabled, every conclusion after that timestamp is bounded by a logging gap —
+   say so. Note how far back the data goes.
 2. **Triage with the trusted `detect_investigation_triage` query — never a raw
    sweep.** It is built for exactly this: it ranks actors (and their source IPs)
    by how many **distinct security-sensitive action types** they touched (breadth

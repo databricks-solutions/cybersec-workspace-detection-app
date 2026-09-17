@@ -27,6 +27,17 @@
 -- non-SSO / employee-logon detections cover authentication specifically; triage
 -- is about who touched controls.
 --
+-- Account CREATION and DELETION (MITRE T1136 / T1531) are also DELIBERATELY
+-- EXCLUDED from the ranked set, for a different reason: their audit action names
+-- are the generic 'add' / 'delete', which only mean "user account" when also
+-- scoped to service_name='accounts' (and, for creation,
+-- request_params.endpoint='adminConsole'). This asset ranks on action_name alone
+-- with no service scope, so admitting bare 'add'/'delete' would match unrelated
+-- add/delete events across services and inflate the breadth count. Persistence via
+-- an attacker-created identity, and its later cleanup, are covered by the dedicated
+-- detect_user_account_created / detect_user_account_deleted functions -- run those
+-- against the lead during the Step 3 pivot when persistence or cleanup is in scope.
+--
 -- The output is one row per actor+source_ip, capped at the top 50 by breadth
 -- then failures then volume. Pivot on the top row with the per-family detection
 -- queries (e.g. detect_ip_access_list_changes) filtered to that actor.
