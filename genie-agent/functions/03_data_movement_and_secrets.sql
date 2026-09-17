@@ -1,11 +1,12 @@
 -- =============================================================================
 -- Genie Agent Trusted Assets -- data movement, secrets, credential scanning
 -- =============================================================================
--- Ports 7 detections. Replace ${CATALOG} / ${SCHEMA} before running.
+-- Ports 9 detections. Replace ${CATALOG} / ${SCHEMA} before running.
 --
--- NOTE ON ONE SOURCE TABLE: detect_data_movement_sql_queries reads
--- system.query.history, not system.access.audit. Grant SELECT on BOTH, and add
--- both as Genie data sources.
+-- NOTE ON SOURCE TABLES: two functions here read system.query.history in
+-- addition to (or instead of) system.access.audit --
+-- detect_data_movement_sql_queries and detect_encoded_command_execution. Grant
+-- SELECT on BOTH tables, and add BOTH as Genie data sources.
 -- =============================================================================
 
 -- --------------------------------------------------------------------------
@@ -436,4 +437,109 @@ RETURN
   FROM per_user_day AS d
   LEFT JOIN per_user_threshold AS t ON d.actor = t.actor
   WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE))
+  );
+
+-- --------------------------------------------------------------------------
+-- Encoded command execution in SQL statements and notebook/job commands.
+-- Port of behavioral/encoded_command_execution.py (David Veuve, PR #10).
+--
+-- Detects hex/base64 payloads decoded at runtime -- UNHEX(), `xxd -r`,
+-- `base64 -d | bash`, `printf "<hex>" | xxd -r -p | bash` -- the obfuscation
+-- technique seen in Databricks pen tests to slip a shell command past
+-- plain-text keyword detections. MITRE T1027 (Obfuscated Files or Information)
+-- and T1059 (Command and Scripting Interpreter), TA0005 Defense Evasion.
+--
+-- TWO SOURCES, UNION ALL:
+--   * system.query.history -- SQL cells, DBSQL warehouses, SQL-via-API. The actor
+--     is executed_by (the submitter), NOT executed_as: executed_as is the run-as
+--     identity, which masks the real submitter behind an owner or service
+--     principal on scheduled/owned queries -- wrong for incident attribution.
+--   * system.access.audit  -- notebook and job command executions (runCommand,
+--     submitCommand). service_name IN ('notebook','jobs') is load-bearing:
+--     verified live, `jobs` runCommand outnumbers `notebook` ~370x (133,143 vs
+--     356 in 30 days), and a scheduled job task is exactly where an encoded
+--     payload would live -- it also buys persistence and a schedule. Filtering
+--     `notebook` alone misses ~99.7% of command executions.
+--
+-- REGEX-ESCAPING TRAP (verified live 2026-09-03): the source notebook is PySpark
+-- and writes r"\b" / r"\|" in rlike(). Ported VERBATIM into a Spark SQL string
+-- literal those SILENTLY break -- a SQL literal turns \b into a backspace char,
+-- so `base64 -d|bash` stops matching. Live proof:
+--   'base64 -d|bash' RLIKE '(--decode|-d)\b'  -> FALSE   (backspace, wrong)
+--   'base64 -d|bash' RLIKE '(--decode|-d)\\b' -> TRUE    (word boundary, right)
+-- Every backslash below is doubled for this reason. Do NOT "simplify" them.
+--
+-- ENCODING_TECHNIQUE is a first-match triage label, NOT exhaustive: a statement
+-- using both UNHEX( and base64 reports only UNHEX (tested first).
+--
+-- STATEMENT_TEXT is the payload itself -- treat output as SENSITIVE and inspect
+-- before escalating. Legitimate data-engineering use of UNHEX/base64 for binary
+-- data is the expected false positive; the pipe-to-shell requirement on the
+-- printf branch is what separates an executable payload from a bare hex string.
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_encoded_command_execution(
+  start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
+  end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
+)
+RETURNS TABLE (
+  event_time         TIMESTAMP COMMENT 'When the statement/command ran (UTC)',
+  actor              STRING    COMMENT 'Submitter: executed_by (query history) or user_identity.email (audit)',
+  surface            STRING    COMMENT 'Where it ran: sql_warehouse, or the audit service_name (jobs / notebook)',
+  encoding_technique STRING    COMMENT 'First-match triage label (UNHEX / xxd decode / base64 decode / printf hex) -- NOT exhaustive',
+  source_ip          STRING    COMMENT 'Source IP (audit rows only; NULL for sql_warehouse -- query history carries none)',
+  statement_id       STRING    COMMENT 'statement_id (query history) or commandId (audit), for pivoting',
+  statement_text     STRING    COMMENT 'SENSITIVE: the full statement/command carrying the encoded payload. Redact before sharing.'
+)
+COMMENT 'SQL statements or notebook/job commands that decode a hex or base64 payload at runtime (UNHEX(), xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Observed in Databricks pen tests to hide curl exfiltration, reverse shells and credential harvesting from plain-text keyword detections. Reads BOTH system.query.history AND system.access.audit (notebook + job command events) -- requires SELECT on system.query.history. statement_text is the payload itself: SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation.'
+RETURN
+  SELECT * FROM (
+    SELECT
+      to_timestamp(q.start_time) AS event_time,
+      q.executed_by              AS actor,
+      'sql_warehouse'            AS surface,
+      CASE
+        WHEN upper(q.statement_text) LIKE '%UNHEX(%'                        THEN 'UNHEX'
+        WHEN q.statement_text LIKE '%xxd%' AND q.statement_text LIKE '%-r%' THEN 'xxd decode'
+        WHEN q.statement_text LIKE '%base64%'                               THEN 'base64 decode'
+        WHEN q.statement_text LIKE '%printf%'                               THEN 'printf hex'
+        ELSE 'encoded payload'
+      END                        AS encoding_technique,
+      CAST(NULL AS STRING)       AS source_ip,
+      q.statement_id             AS statement_id,
+      q.statement_text           AS statement_text
+    FROM system.query.history AS q
+    WHERE q.start_time BETWEEN start_time AND end_time
+      AND (
+        upper(q.statement_text) LIKE '%UNHEX(%'
+        OR (q.statement_text LIKE '%xxd%' AND q.statement_text LIKE '%-r%')
+        OR (q.statement_text LIKE '%base64%' AND q.statement_text RLIKE '(--decode|-d)\\b')
+        OR (q.statement_text LIKE '%printf%' AND q.statement_text RLIKE '[0-9a-fA-F]{20,}'
+            AND (q.statement_text LIKE '%xxd%' OR q.statement_text RLIKE '\\|\\s*(ba)?sh\\b'))
+      )
+    UNION ALL
+    SELECT
+      a.event_time                    AS event_time,
+      a.user_identity.email           AS actor,
+      a.service_name                  AS surface,
+      CASE
+        WHEN upper(a.request_params['commandText']) LIKE '%UNHEX(%'                                          THEN 'UNHEX'
+        WHEN a.request_params['commandText'] LIKE '%xxd%' AND a.request_params['commandText'] LIKE '%-r%'    THEN 'xxd decode'
+        WHEN a.request_params['commandText'] LIKE '%base64%'                                                 THEN 'base64 decode'
+        WHEN a.request_params['commandText'] LIKE '%printf%'                                                 THEN 'printf hex'
+        ELSE 'encoded payload'
+      END                             AS encoding_technique,
+      a.source_ip_address             AS source_ip,
+      a.request_params['commandId']   AS statement_id,
+      a.request_params['commandText'] AS statement_text
+    FROM system.access.audit AS a
+    WHERE a.event_time BETWEEN start_time AND end_time
+      AND a.service_name IN ('notebook', 'jobs')
+      AND a.action_name IN ('runCommand', 'submitCommand')
+      AND (
+        upper(a.request_params['commandText']) LIKE '%UNHEX(%'
+        OR (a.request_params['commandText'] LIKE '%xxd%' AND a.request_params['commandText'] LIKE '%-r%')
+        OR (a.request_params['commandText'] LIKE '%base64%' AND a.request_params['commandText'] RLIKE '(--decode|-d)\\b')
+        OR (a.request_params['commandText'] LIKE '%printf%' AND a.request_params['commandText'] RLIKE '[0-9a-fA-F]{20,}'
+            AND (a.request_params['commandText'] LIKE '%xxd%' OR a.request_params['commandText'] RLIKE '\\|\\s*(ba)?sh\\b'))
+      )
   );
