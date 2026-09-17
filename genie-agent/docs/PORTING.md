@@ -160,6 +160,23 @@ Double every backslash (`\\b`, `\\|`, `\\s`) in a ported regex, and prove it
 fires against a known payload rather than trusting a clean install — a regex that
 matches nothing installs without error.
 
+**The port attributes SQL to `executed_by`, not `executed_as` — and the #10
+notebook still does the opposite.** `system.query.history` carries two identities:
+`executed_by` (who submitted the statement) and `executed_as` (the run-as identity
+the statement executes under, which on a scheduled or owned query is the owner or a
+service principal — masking the human who submitted it). For incident attribution
+you want the submitter, so `detect_encoded_command_execution` reports `executed_by`.
+The scheduled-notebook counterpart (PR #10,
+`base/detections/behavioral/encoded_command_execution.py`) still reports
+`executed_as`, so the interactive and scheduled surfaces can name *different* actors
+for the same SQL-warehouse statement. Everything else is already in parity: the
+base64 word-boundary match, the narrowed printf branch (`[0-9a-fA-F]{20,}` + a
+pipe-to-shell or `xxd`), and the `runCommand`/`submitCommand` × `notebook`/`jobs`
+audit source all match #10 as of its review-fix commit `795795c`. Attribution is
+the one place they still differ. **Follow-up:** backport `executed_by` to the #10
+notebook so both surfaces attribute to the submitter — tracked separately because
+that notebook is not on this branch.
+
 **A correlated `IN (SELECT explode(...))` creates on a SQL warehouse but FAILS in a
 UDF body on DBR.** The three admin-grant functions used
 `IN (SELECT trim(g) FROM (SELECT explode(split(admin_groups, ',')) AS g))` to match
