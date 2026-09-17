@@ -223,7 +223,18 @@ def parse_functions(functions_dir: str | Path) -> Dict[str, FunctionDef]:
 # --------------------------------------------------------------------------- #
 #  Example-call parser + inliner                                              #
 # --------------------------------------------------------------------------- #
-_CALL_RE = re.compile(r"\.(\w+)\s*\(", re.IGNORECASE)
+# Find the detection table-function call in an example wrapper, whether it is
+# fully qualified (`${catalog}.${schema}.detect_x(`), partially qualified
+# (`schema.detect_x(`), or BARE (`detect_x(`). The templates historically carry a
+# `${catalog}.${schema}.` prefix, but the embedded / no-DDL install no longer needs
+# it -- so this MUST NOT depend on that leading dot. If someone "tidies away" those
+# now-vestigial placeholders, a dot-anchored pattern would match nothing and every
+# install would break silently. The optional `(?:\w+\.)*` qualifier makes removing
+# them safe; anchoring on the `detect_` naming convention (every function in
+# functions/*.sql starts with it) keeps `.search` from latching onto an incidental
+# earlier call such as `to_timestamp(`. If a detection is ever named without the
+# `detect_` prefix, widen this pattern in lockstep.
+_CALL_RE = re.compile(r"(?:\w+\.)*(detect_\w+)\s*\(", re.IGNORECASE)
 
 
 def parse_call(sql: str) -> Tuple[str, List[str]]:
