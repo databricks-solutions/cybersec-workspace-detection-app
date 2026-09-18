@@ -14,6 +14,36 @@ Replace `<catalog>` with your catalog name.
 
 ---
 
+## Investigation mode — goal-directed (multi-turn)
+
+The agent answers **one query per turn**, so an open-ended investigation plays out
+as a short sequence of prompts, not one giant answer. Drive it with **explicit step
+prompts** — a bare "proceed" advances the loop but may stop at evidence and ask a
+question; an outer "goal" driver (or an analyst) sends these in order:
+
+1. **Kick off** — *"Investigate whether this account was compromised in the last 90
+   days."* The agent establishes visibility first (was verbose audit logging ever
+   disabled? — that bounds every later conclusion).
+2. **Triage** — *"Rank the actors by security-sensitive activity and name the
+   lead."* This runs the trusted triage asset, which ranks actors/IPs by the
+   breadth of distinct sensitive action types they touched, so the lead surfaces at
+   the top of a small result instead of drowning in login volume:
+   ```sql
+   SELECT * FROM <catalog>.security_detections.detect_investigation_triage(
+     current_timestamp() - INTERVAL 90 DAYS, current_timestamp())
+   ```
+3. **Pivot** — *"Investigate `<suspect_actor>` from `<suspect_ip>`: what did they do
+   to security controls?"* Scopes to the lead's sensitive activity (never a raw dump
+   of everything they did) and reads the `user_agent` on each change.
+4. **Verdict** — *"Is this an attack or benign? Give your verdict with a confidence
+   level."* The agent weighs the evidence — a recognised migration/CLI/SDK client
+   points to benign operations; an interactive client doing the same reads
+   differently — and states plainly what the audit log cannot settle (e.g. the
+   before/after CIDRs of an IP-ACL change) and which data source would.
+
+Fill `<suspect_actor>` / `<suspect_ip>` from the triage lead. The whole sequence is
+read-only.
+
 ## Incident response — IP access lists
 
 **"Who changed our IP allow list, and what did they change it to?"**
