@@ -2,13 +2,13 @@
 # MAGIC %md
 # MAGIC # Install the Security Detections Genie Agent
 # MAGIC
-# MAGIC Run this notebook from a Git folder in your own workspace. It installs
-# MAGIC every detection as a Unity Catalog SQL function and creates the Genie Agent
-# MAGIC that queries them.
+# MAGIC Run this notebook from a Git folder in your own workspace. It creates the
+# MAGIC Genie Agent with every detection embedded as a parameterized example query —
+# MAGIC **no Unity Catalog functions, no schema, no DDL**.
 # MAGIC
 # MAGIC **No local setup.** No Databricks CLI, no Python environment, no cloning to
 # MAGIC your laptop — the notebook reads the SQL from the Git folder it is running in
-# MAGIC and executes it with the notebook's own credentials.
+# MAGIC and builds the agent with the notebook's own credentials.
 # MAGIC
 # MAGIC ## Before you start
 # MAGIC
@@ -16,24 +16,24 @@
 # MAGIC    Workspace → Create → Git folder →
 # MAGIC    `https://github.com/databricks-solutions/cybersec-workspace-detection-app`
 # MAGIC    Leave *Sparse checkout* unchecked — this notebook reads sibling files from
-# MAGIC    `genie-agent/functions/` and `genie-agent/agent/`.
+# MAGIC    `genie-agent/functions/`, `genie-agent/agent/`, and `genie-agent/tools/`.
 # MAGIC 2. **Open this notebook from inside that Git folder.** Attach compute —
 # MAGIC    **Serverless works** and is the simplest choice.
-# MAGIC 3. **Fill in the widgets** at the top: catalog, schema, and — only if you
-# MAGIC    want the agent created for you — a SQL warehouse id.
+# MAGIC 3. **Fill in the widgets** at the top: a SQL warehouse id is optional (blank =
+# MAGIC    auto-select one for the agent to run on).
 # MAGIC
 # MAGIC ## What you need permission to do
 # MAGIC
 # MAGIC | Step | Permission |
 # MAGIC |---|---|
-# MAGIC | Create the schema | `CREATE SCHEMA` on the catalog |
-# MAGIC | Install the functions | `CREATE FUNCTION` + `USE SCHEMA` |
-# MAGIC | Read audit data | `SELECT` on `system.access.audit` |
-# MAGIC | Create the agent (optional) | Genie enabled; `CAN USE` on a SQL warehouse |
+# MAGIC | Read audit data (preflight) | `SELECT` on `system.access.audit` |
+# MAGIC | Create the agent | Genie enabled; `CAN USE` on a SQL warehouse |
 # MAGIC
-# MAGIC If `system.access.audit` is not readable, an **account admin** must run
-# MAGIC `ALTER METASTORE ENABLE SCHEMA system.access;` once per metastore. That is the
-# MAGIC single most common blocker.
+# MAGIC No `CREATE SCHEMA` or `CREATE FUNCTION` is needed — the agent embeds the
+# MAGIC detection SQL, it does not create catalog objects. If `system.access.audit` is
+# MAGIC not readable, an **account admin** must run
+# MAGIC `ALTER METASTORE ENABLE SCHEMA system.access;` once per metastore — the single
+# MAGIC most common blocker.
 # MAGIC
 # MAGIC ## Two things this does NOT do
 # MAGIC
@@ -41,15 +41,13 @@
 # MAGIC   produce alerts; this agent answers questions while you investigate. Keep
 # MAGIC   both — installing this and switching those off would leave nothing watching
 # MAGIC   your account.
-# MAGIC * **It writes nothing to your audit data.** Every function is read-only.
+# MAGIC * **It writes nothing to your audit data.** Every embedded query is read-only.
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "", "1. Catalog (required)")
-dbutils.widgets.text("schema", "security_detections", "2. Schema")
-dbutils.widgets.text("warehouse_id", "", "3. SQL warehouse id (blank = skip agent)")
-dbutils.widgets.text("space_id", "", "4. Existing agent id (blank = create new)")
-dbutils.widgets.dropdown("create_agent", "yes", ["yes", "no"], "5. Create the Genie Agent?")
+dbutils.widgets.text("warehouse_id", "", "1. SQL warehouse id (blank = auto-select)")
+dbutils.widgets.text("space_id", "", "2. Existing agent id (blank = create new)")
+dbutils.widgets.dropdown("create_agent", "yes", ["yes", "no"], "3. Create the Genie Agent?")
 
 # COMMAND ----------
 
@@ -62,22 +60,14 @@ dbutils.widgets.dropdown("create_agent", "yes", ["yes", "no"], "5. Create the Ge
 # COMMAND ----------
 
 import json
-import os
 import re
+import sys
 import uuid
 from pathlib import Path
 
-CATALOG = dbutils.widgets.get("catalog").strip()
-SCHEMA = dbutils.widgets.get("schema").strip() or "security_detections"
 WAREHOUSE_ID = dbutils.widgets.get("warehouse_id").strip()
 SPACE_ID = dbutils.widgets.get("space_id").strip()
 CREATE_AGENT = dbutils.widgets.get("create_agent") == "yes"
-
-if not CATALOG:
-    raise ValueError(
-        "Set the 'catalog' widget. Use a catalog your security team owns -- anyone "
-        "granted EXECUTE on these functions can read audit data through them."
-    )
 
 # Same self-location idiom lib/common.py and lib/notebook_generator_base.py use.
 _nb_path = (
@@ -85,21 +75,27 @@ _nb_path = (
 )
 # .../<git-folder>/genie-agent/deploy/install_notebook -> the repo root is 3 up.
 REPO_ROOT = Path("/Workspace" + _nb_path).parent.parent.parent
-FUNCTIONS_DIR = REPO_ROOT / "genie-agent" / "functions"
-AGENT_DIR = REPO_ROOT / "genie-agent" / "agent"
+GENIE_DIR = REPO_ROOT / "genie-agent"
+FUNCTIONS_DIR = GENIE_DIR / "functions"
+AGENT_DIR = GENIE_DIR / "agent"
+TOOLS_DIR = GENIE_DIR / "tools"
 
 print(f"notebook   : {_nb_path}")
 print(f"repo root  : {REPO_ROOT}")
 print(f"functions  : {FUNCTIONS_DIR}")
 
-if not FUNCTIONS_DIR.is_dir():
+if not FUNCTIONS_DIR.is_dir() or not TOOLS_DIR.is_dir():
     raise FileNotFoundError(
         f"{FUNCTIONS_DIR} not found.\n\n"
         "This notebook must run from inside a Git folder cloned from "
         "databricks-solutions/cybersec-workspace-detection-app. If you imported "
-        "just this one notebook, the SQL files are not there -- add the repo as a "
-        "Git folder instead (Workspace -> Create -> Git folder)."
+        "just this one notebook, the SQL and tools files are not there -- add the "
+        "repo as a Git folder instead (Workspace -> Create -> Git folder)."
     )
+
+# The inliner that turns functions/*.sql into embedded example queries.
+sys.path.insert(0, str(TOOLS_DIR))
+from inline_functions import build_example_sqls  # noqa: E402
 
 sql_files = sorted(FUNCTIONS_DIR.glob("*.sql"))
 print(f"\nfound {len(sql_files)} SQL file(s): {[f.name for f in sql_files]}")
@@ -154,138 +150,104 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 3 — Install the functions
+# MAGIC ## Step 3 — Build the agent's embedded queries
 # MAGIC
-# MAGIC Function names are **fully qualified** from the widgets. That is deliberate: a
-# MAGIC bare `CREATE FUNCTION` lands in whatever catalog the session defaults to —
-# MAGIC often `hive_metastore` — and a function there cannot reference the Unity
-# MAGIC Catalog table `system.access.audit`. It fails with
-# MAGIC `UC_COMMAND_NOT_SUPPORTED`, an error that never mentions the session catalog.
+# MAGIC Each detection in `functions/*.sql` is inlined into the space as a
+# MAGIC parameterized example query (`:start_time` / `:end_time`, plus any threshold).
+# MAGIC Nothing is created in Unity Catalog. `functions/*.sql` stays the single source
+# MAGIC of truth; the same inliner backs the CLI installer.
 
 # COMMAND ----------
 
-spark.sql(
-    f"CREATE SCHEMA IF NOT EXISTS `{CATALOG}`.`{SCHEMA}` "
-    f"COMMENT 'Security detection functions for the Genie Agent'"
-)
-print(f"schema ready: {CATALOG}.{SCHEMA}")
+template = AGENT_DIR / "serialized_space.template.json"
+if not template.exists():
+    raise FileNotFoundError(f"{template} not found in the Git folder")
 
+space = json.loads(template.read_text(encoding="utf-8"))
 
-def _split_statements(sql_text: str) -> list:
-    """Split a function file into individual CREATE FUNCTION statements.
+instructions = AGENT_DIR / "instructions.md"
+if instructions.exists():
+    space["instructions"]["text_instructions"] = [
+        {"id": uuid.uuid4().hex,
+         "content": instructions.read_text(encoding="utf-8").splitlines(keepends=True)}
+    ]
 
-    Splits on ``;`` at end-of-line rather than every ``;`` -- semicolons appear
-    inside COMMENT text, and splitting on those cuts a statement in half.
-    """
-    out = []
-    for chunk in sql_text.split(";\n"):
-        if "CREATE OR REPLACE FUNCTION" not in chunk:
-            continue
-        out.append(chunk[chunk.index("CREATE OR REPLACE FUNCTION") :].strip())
-    return out
+examples = space["instructions"].get("example_question_sqls", [])
+build_example_sqls(FUNCTIONS_DIR, examples)  # detect_x() wrappers -> inlined SQL
+for ex in examples:
+    if not re.match(r"^[0-9a-f]{32}$", str(ex.get("id", ""))):
+        ex["id"] = uuid.uuid4().hex
+examples.sort(key=lambda e: e["id"])  # load-bearing: the API rejects an unsorted list
+space["instructions"]["example_question_sqls"] = examples
 
-
-installed, failed = [], []
-for path in sql_files:
-    text = path.read_text(encoding="utf-8")
-    text = text.replace("${CATALOG}", CATALOG).replace("${SCHEMA}", SCHEMA)
-    stmts = _split_statements(text)
-    print(f"\n{path.name}: {len(stmts)} function(s)")
-    for stmt in stmts:
-        m = re.match(r"CREATE OR REPLACE FUNCTION ([\w.`]+)\(", stmt)
-        name = m.group(1).split(".")[-1].strip("`") if m else "?"
-        # Belt and braces: qualify anything the placeholder pass missed, so a
-        # hand-edited file cannot land a function in hive_metastore.
-        if m and "." not in m.group(1):
-            stmt = stmt.replace(
-                f"CREATE OR REPLACE FUNCTION {m.group(1)}(",
-                f"CREATE OR REPLACE FUNCTION {CATALOG}.{SCHEMA}.{m.group(1)}(",
-                1,
-            )
-        try:
-            spark.sql(stmt)
-            installed.append(name)
-            print(f"  OK   {name}")
-        except Exception as exc:  # noqa: BLE001 - report and continue
-            failed.append((name, str(exc)[:200]))
-            print(f"  FAIL {name}: {str(exc)[:160]}")
-
-print(f"\ninstalled {len(installed)}, failed {len(failed)}")
-if failed:
-    for n, e in failed:
-        print(f"  ! {n}: {e}")
-    raise SystemExit("some functions failed to install -- fix the errors above before continuing")
+serialized = json.dumps(space, indent=2)
+print(f"built space payload: {len(examples)} embedded queries, {len(serialized):,} bytes")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 4 — Smoke-test
+# MAGIC ## Step 4 — Smoke-test the embedded queries
 # MAGIC
-# MAGIC A function returning zero rows because of a wrong filter looks identical to
-# MAGIC one returning zero rows because nothing happened. Expect **some** functions to
-# MAGIC be empty: on one reference workspace 19 of 33 returned data and 14 were empty
-# MAGIC because those events do not occur there. That is an empty environment, not a
-# MAGIC broken install.
+# MAGIC Run each embedded query for the last 90 days. A query returning zero rows
+# MAGIC because of a wrong filter looks identical to one returning zero because nothing
+# MAGIC happened — so expect **some** empties: on one reference workspace ~20 of 33
+# MAGIC returned data and the rest were empty because those events do not occur there.
+# MAGIC That is an empty environment, not a broken build.
 
 # COMMAND ----------
 
-# Functions with extra tuning parameters (thresholds, admin group lists) cannot be
-# called with only the two timestamps. Their defaults are read from each
-# function's own signature so the smoke test exercises every one, rather than
-# skipping the interesting ones.
-_DEFAULTS = {"STRING": "''", "INT": "5", "DOUBLE": "5.0"}
+# Named parameters (:start_time / :end_time) bind through spark.sql(args=...).
+_args = {
+    "start_time": "2000-01-01T00:00:00Z",  # placeholders overwritten below
+    "end_time": "2000-01-01T00:00:00Z",
+}
+_win = spark.sql(
+    "SELECT current_timestamp() - INTERVAL 90 DAYS AS s, current_timestamp() AS e"
+).collect()[0]
+_args = {"start_time": _win["s"], "end_time": _win["e"]}
 
-
-def _extra_args(fn_name: str) -> str:
-    """Literal args beyond start_time/end_time, from the function's signature."""
-    rows = spark.sql(
-        f"DESCRIBE FUNCTION EXTENDED {CATALOG}.{SCHEMA}.{fn_name}"
-    ).collect()
-    body = "\n".join(str(r[0]) for r in rows)
-    sig = re.search(r"\((.*?)\)\s*RETURNS", body, re.S)
-    if not sig:
-        return ""
-    params = re.findall(r"(\w+)\s+(TIMESTAMP|STRING|INT|DOUBLE)", sig.group(1))
-    extra = [p for p in params if p[0] not in ("start_time", "end_time")]
-    return "".join(", " + _DEFAULTS[t] for _, t in extra)
-
-
-_results = []
-for fn in sorted(installed):
+results = []
+for ex in examples:
+    q = "".join(ex["sql"]) if isinstance(ex["sql"], list) else ex["sql"]
+    label = ("".join(ex["question"]) if isinstance(ex["question"], list)
+             else ex["question"])
     try:
-        args = _extra_args(fn)
-        n = spark.sql(
-            f"SELECT count(*) AS n FROM {CATALOG}.{SCHEMA}.{fn}("
-            f"current_timestamp() - INTERVAL 90 DAYS, current_timestamp(){args})"
-        ).collect()[0]["n"]
-        _results.append((fn, n, None))
+        n = spark.sql(q, args=_args).count()
+        results.append((label, n, None))
     except Exception as exc:  # noqa: BLE001 - report, do not abort the sweep
-        _results.append((fn, None, str(exc)[:120]))
+        results.append((label, None, str(exc)[:160]))
 
-_with_data = [r for r in _results if r[1]]
-_empty = [r for r in _results if r[1] == 0]
-_errored = [r for r in _results if r[1] is None]
+_with_data = [r for r in results if r[1]]
+_empty = [r for r in results if r[1] == 0]
+_errored = [r for r in results if r[1] is None]
 
 print(f"executed with data : {len(_with_data)}")
 print(f"executed, empty    : {len(_empty)}  (expected -- see the note above)")
 print(f"errored            : {len(_errored)}")
-for fn, _, err in _errored:
-    print(f"  ! {fn}: {err}")
+for label, _, err in _errored:
+    print(f"  ! {label}: {err}")
+if _errored:
+    # Do NOT abort the install. The usual cause is a missing OPTIONAL grant --
+    # detect_data_movement_sql_queries reads system.query.history, a separate
+    # prerequisite (see DEPLOY.md) you may not have granted. Those detections
+    # simply return nothing until the grant is in place; every other detection,
+    # and agent creation in Step 5, is unaffected.
+    print("\n! Some embedded queries errored above -- this does NOT block agent")
+    print("  creation. Most often it is a missing SELECT on system.query.history")
+    print("  (an optional, separate prerequisite). Grant it if you want those")
+    print("  detections to return results; otherwise continue.")
 print("\ntop results:")
-for fn, n, _ in sorted(_with_data, key=lambda r: -r[1])[:10]:
-    print(f"  {n:>9,}  {fn}")
+for label, n, _ in sorted(_with_data, key=lambda r: -r[1])[:10]:
+    print(f"  {n:>9,}  {label}")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Step 5 — Create the Genie Agent
 # MAGIC
-# MAGIC Optional. Needs a SQL warehouse id. Set `create_agent` to `no` if you only
-# MAGIC want the functions, or if someone else owns agent creation.
-# MAGIC
-# MAGIC Two API rules are handled here because both fail obscurely:
-# MAGIC `example_question_sqls` must be **sorted by a 32-char hex id** (otherwise
-# MAGIC `Invalid export proto`), and reading an existing space needs
+# MAGIC Optional. Set `create_agent` to `no` if someone else owns agent creation.
+# MAGIC A SQL warehouse is auto-selected if the widget is blank (the space runs its
+# MAGIC queries there). Reading an existing space to update it needs
 # MAGIC `include_serialized_space=true` **with CAN EDIT** — without it the field is
 # MAGIC omitted *silently* rather than erroring.
 
@@ -293,42 +255,26 @@ for fn, n, _ in sorted(_with_data, key=lambda r: -r[1])[:10]:
 
 if not CREATE_AGENT:
     print("skipping agent creation (create_agent = no)")
-elif not WAREHOUSE_ID:
-    print("skipping agent creation: no warehouse_id set")
-    print("Functions are installed. Add them to a Genie Agent under")
-    print("Configure -> Examples, or re-run this notebook with a warehouse id.")
 else:
     from databricks.sdk import WorkspaceClient
 
     w = WorkspaceClient()
-    template = AGENT_DIR / "serialized_space.template.json"
-    if not template.exists():
-        raise FileNotFoundError(f"{template} not found in the Git folder")
 
-    space = json.loads(
-        template.read_text(encoding="utf-8").replace(
-            "${catalog}.${schema}", f"{CATALOG}.{SCHEMA}"
-        )
-    )
-
-    instructions = AGENT_DIR / "instructions.md"
-    if instructions.exists():
-        space["instructions"]["text_instructions"] = [
-            {
-                "id": uuid.uuid4().hex,
-                "content": instructions.read_text(encoding="utf-8").splitlines(keepends=True),
-            }
-        ]
-
-    examples = space["instructions"].get("example_question_sqls", [])
-    for ex in examples:
-        if not re.match(r"^[0-9a-f]{32}$", str(ex.get("id", ""))):
-            ex["id"] = uuid.uuid4().hex
-    examples.sort(key=lambda e: e["id"])  # load-bearing: unsorted is rejected
-    space["instructions"]["example_question_sqls"] = examples
-
-    serialized = json.dumps(space, indent=2)
-    print(f"space payload: {len(examples)} examples, {len(serialized):,} bytes")
+    warehouse_id = WAREHOUSE_ID
+    if not warehouse_id:
+        # Auto-pick: prefer a RUNNING serverless warehouse, then any RUNNING, then any.
+        whs = list(w.warehouses.list())
+        if not whs:
+            raise SystemExit(
+                "no SQL warehouse found. Create one, or set the warehouse_id widget."
+            )
+        def _score(wh):
+            running = getattr(wh, "state", None) and str(wh.state).endswith("RUNNING")
+            serverless = getattr(wh, "enable_serverless_compute", False)
+            return (bool(running), bool(serverless))
+        best = max(whs, key=_score)
+        warehouse_id = best.id
+        print(f"auto-selected warehouse {warehouse_id} ({best.name}, state={best.state})")
 
     if SPACE_ID:
         current = w.api_client.do(
@@ -341,7 +287,7 @@ else:
                 "requires CAN EDIT on the space; without it the field is omitted "
                 "silently rather than erroring."
             )
-        res = w.api_client.do(
+        w.api_client.do(
             "PATCH",
             f"/api/2.0/genie/spaces/{SPACE_ID}",
             body={"serialized_space": serialized, "etag": etag},
@@ -353,7 +299,7 @@ else:
             "POST",
             "/api/2.0/genie/spaces",
             body={
-                "warehouse_id": WAREHOUSE_ID,
+                "warehouse_id": warehouse_id,
                 "serialized_space": serialized,
                 "title": "Databricks Security Audit Investigator",
             },
