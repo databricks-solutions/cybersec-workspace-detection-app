@@ -204,7 +204,7 @@ to the function's `Use for:` list, or add an Example SQL Query.
 
 ## 6. Questions you can ask
 
-**33 functions covering all 35 detections in this repo.** By theme:
+**34 functions covering the detections in this repo.** By theme:
 
 **IP access & network** — who changed the IP allow list; who deleted a list;
 failed attempts to change IP rules; who was blocked and what they were reaching
@@ -225,6 +225,11 @@ access; SSO/IdP configuration changes.
 `COPY INTO` with inline credentials; download and export volume per user; bulk
 notebook export scored against each principal's own history (source-code
 exfiltration).
+
+**Execution & obfuscation** — SQL or notebook/job commands that decode a hex or
+base64 payload at runtime (`UNHEX`, `xxd -r`, `base64 -d | bash`) to hide an
+executed command — the obfuscation technique seen in Databricks pen tests. Reads
+both query history and job/notebook command events.
 
 **Secrets** — identities that enumerate secret scopes *and* read many distinct
 secrets (the discovery pattern, not just normal reads).
@@ -358,7 +363,7 @@ Layout:
 
 ```
 genie-agent/
-├── functions/     33 UC SQL functions (4 themed files)
+├── functions/     34 UC SQL functions (4 themed files)
 ├── agent/         instructions, example questions, serialized_space template
 ├── deploy/        install_notebook (recommended) + install.py (CLI fallback)
 ├── tools/         metadata extractor
@@ -390,12 +395,15 @@ window — identical row sets. Every `request_params` key is verified against li
 data rather than the REST API docs — they differ, and a wrong key returns NULL
 rather than erroring. Keys are listed at the top of each SQL file.
 
-**Coverage: 35/35 detections in 33 functions.** Fewer functions than detections
-because four near-identical notebooks were merged into two: `mfa_key_added` +
-`mfa_key_deleted` → `detect_mfa_key_changes`, and the four group notebooks →
-`detect_group_changes`. Genie selects better from one well-described function than
-from several near-duplicates, and both directions of a change answer the same
-investigative question.
+**Coverage: 34 functions.** 33 cover the 35 detections in this repo — fewer
+functions than detections because four near-identical notebooks were merged into
+two: `mfa_key_added` + `mfa_key_deleted` → `detect_mfa_key_changes`, and the four
+group notebooks → `detect_group_changes`. Genie selects better from one
+well-described function than from several near-duplicates, and both directions of
+a change answer the same investigative question. The 34th,
+`detect_encoded_command_execution`, is the interactive-query counterpart to the
+scheduled-notebook detection from PR #10
+(`base/detections/behavioral/encoded_command_execution.py`, already in `main`).
 
 **Two deliberate deviations from the notebooks**, both documented inline:
 `detect_admin_sql_activity_spike` reports a threshold count rather than the

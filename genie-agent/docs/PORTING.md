@@ -48,7 +48,7 @@ calls them**, so all are SQL-portable today.
 |---|---|---|
 | `01_ip_access_and_config.sql` | 5 | IP access lists, high-priority + account-level config, denied logons |
 | `02_identity_and_access.sql` | 15 | tokens, admin grants (account/workspace/metastore), user lifecycle, roles, passwords, MFA, groups, non-SSO + employee logon, SSO config |
-| `03_data_movement_and_secrets.sql` | 8 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike |
+| `03_data_movement_and_secrets.sql` | 9 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike, encoded command execution |
 | `04_sessions_and_config.sql` | 5 | session hijacking ×3, verbose-audit-logging evasion, workspace config |
 
 Some near-identical notebooks were merged deliberately: `mfa_key_added` +
@@ -176,6 +176,42 @@ standalone, which makes it look like a permissions or transport problem rather
 than a syntax one. Cost real time on `detect_bulk_notebook_export`; the wrap is
 commented in place so nobody "tidies" it away. (The inliner then wraps that body
 once more for column renaming — a valid nested subquery.)
+
+**A PySpark `r"\b"` regex SILENTLY breaks when ported into a Spark SQL string
+literal.** The `encoded_command_execution` port (PR #10) matches `base64 -d|bash`
+with `rlike(r"(--decode|-d)\b")` and pipe-to-shell with `r"\|\s*(ba)?sh\b"`. In
+PySpark the `r"..."` preserves the backslash, so Java regex sees a word boundary.
+Dropped verbatim into a SQL `RLIKE '...'` it breaks: the SQL string-literal parser
+consumes `\b` as a backspace character *before* the regex engine ever sees it, so
+the word boundary is gone and `base64 -d|bash` stops matching — the same
+"looks-fine, matches-nothing" failure as a wrong `request_params` key. Verified
+live (2026-09-03):
+
+```
+'base64 -d|bash' RLIKE '(--decode|-d)\b'   -> false   (backspace)
+'base64 -d|bash' RLIKE '(--decode|-d)\\b'  -> true    (word boundary)
+```
+
+Double every backslash (`\\b`, `\\|`, `\\s`) in a ported regex, and prove it
+fires against a known payload rather than trusting a clean install — a regex that
+matches nothing installs without error.
+
+**The port attributes SQL to `executed_by`, not `executed_as` — and the #10
+notebook still does the opposite.** `system.query.history` carries two identities:
+`executed_by` (who submitted the statement) and `executed_as` (the run-as identity
+the statement executes under, which on a scheduled or owned query is the owner or a
+service principal — masking the human who submitted it). For incident attribution
+you want the submitter, so `detect_encoded_command_execution` reports `executed_by`.
+The scheduled-notebook counterpart (PR #10,
+`base/detections/behavioral/encoded_command_execution.py`) still reports
+`executed_as`, so the interactive and scheduled surfaces can name *different* actors
+for the same SQL-warehouse statement. Everything else is already in parity: the
+base64 word-boundary match, the narrowed printf branch (`[0-9a-fA-F]{20,}` + a
+pipe-to-shell or `xxd`), and the `runCommand`/`submitCommand` × `notebook`/`jobs`
+audit source all match #10 as of its review-fix commit `795795c`. Attribution is
+the one place they still differ. **Follow-up:** backport `executed_by` to the #10
+notebook so both surfaces attribute to the submitter — tracked separately because
+that notebook is not on this branch.
 
 **A correlated `IN (SELECT explode(...))` creates on a SQL warehouse but FAILS in a
 UDF body on DBR.** The three admin-grant functions used
