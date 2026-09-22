@@ -107,6 +107,19 @@ If it hand-writes SQL instead of using a trusted example query, that query's
 `Use for:` phrasings do not match how you ask. Extend them — expected tuning, not
 a defect. See [`PORTING.md`](PORTING.md) for how the embedded queries are built.
 
+**Investigation mode** (goal-directed) is also worth a quick check:
+
+- *"Investigate whether this account was compromised in the last 90 days."* → the
+  agent should announce investigation mode and first check whether verbose audit
+  logging was disabled (the visibility step), not jump straight to a table.
+- *"Rank the actors by security-sensitive activity and name the lead."* → should
+  run `detect_investigation_triage` and return a short ranked list, the widest-
+  breadth actor/IP at the top — not a raw dump.
+
+Genie answers one query per turn, so drive an investigation as a short sequence of
+explicit prompts (kick off → triage → pivot on the lead → verdict). The full
+playbook is in [`../agent/example_questions.md`](../agent/example_questions.md).
+
 ## Keep the notebooks running
 
 This agent is for **investigation**. It does not run on a schedule, does not write

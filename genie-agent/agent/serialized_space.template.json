@@ -1475,6 +1475,42 @@
         "usage_guidance": [
           "Every workspace-level configuration change (all workspaceConfEdit events) with the setting key and its new value. Broader than the high-priority function, which triages only the security-relevant subset -- use this one when you need a COMPLETE workspace config changelog. MITRE T1484 Domain or Tenant Policy Modification. Use for: all workspace configuration changes, complete config changelog, every setting that changed, workspace settings audit, what settings were modified, workspaceConfEdit."
         ]
+      },
+      {
+        "id": "b11c42cc4f0742d6bb8ff5aa2255ca8c",
+        "question": [
+          "detect_investigation_triage"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM ${catalog}.${schema}.detect_investigation_triage(\n",
+          "  :start_time,\n",
+          "  :end_time",
+          "\n)"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Investigation triage and starting point: ranks actors and their source IPs by how many distinct security-sensitive control actions they touched in the window (breadth across families first, then failed attempts, then volume), so the investigation lead surfaces without a raw sweep. Excludes routine logins by design. Run this FIRST for any open-ended investigation, then pivot on the top actor/IP with the per-family detection queries. Use for: where do I start, triage, who looks suspicious, rank actors by risk, investigation starting point, who touched the most security controls, find the lead, who should I investigate first, suspicious activity overview, prioritize actors for review."
+        ]
       }
     ]
   }
