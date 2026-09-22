@@ -17,7 +17,7 @@ Everything you need is below, in order.
 
 1. [Is this for me?](#1-is-this-for-me)
 2. [What you need before you start](#2-what-you-need-before-you-start)
-3. [Install (about 20 minutes)](#3-install-about-20-minutes)
+3. [Install (about 2 minutes)](#3-install-about-2-minutes)
 4. [Create the agent](#4-create-the-agent)
 5. [Check it works](#5-check-it-works)
 6. [Questions you can ask](#6-questions-you-can-ask)
@@ -57,7 +57,7 @@ be watching your account.** Keep them running.
 | 1 | Unity Catalog enabled | Run `SELECT current_metastore()` — an error means it is not |
 | 2 | A SQL warehouse | Any size. Serverless is easiest |
 | 3 | Access to audit logs | Query below |
-| 4 | Permission to create a schema | Ask your Databricks admin for `CREATE SCHEMA` on a catalog |
+| 4 | Genie enabled + `CAN USE` on a SQL warehouse | To create and run the agent — no `CREATE SCHEMA`/`CREATE FUNCTION` needed; the agent embeds the SQL |
 | 5 | A Git folder, **or** the Databricks CLI | Git folder is easiest; CLI is the fallback if your workspace cannot reach GitHub |
 
 **Check #3 now** — it blocks more installs than anything else. In a SQL editor:
@@ -79,7 +79,7 @@ WHERE event_time >= current_timestamp() - INTERVAL 1 DAY;
 
 ---
 
-## 3. Install (about 20 minutes)
+## 3. Install (about 2 minutes)
 
 ### Step 3.1 — Find out what you can actually see
 
@@ -122,12 +122,12 @@ local Python, nothing cloned to your laptop.
 2. Open **`genie-agent/deploy/install_notebook`** from inside that Git folder
 3. Attach compute. **Serverless works** — that is the simplest choice.
 4. Fill in the widgets:
-   - **catalog** — a catalog your security team owns *(required)*
-   - **schema** — defaults to `security_detections`
-   - **warehouse_id** — the SQL warehouse the *agent* will query through. Leave
-     blank to install functions only and wire the agent up later.
+   - **warehouse_id** — the SQL warehouse the *agent* queries through. Leave
+     blank to auto-select one.
    - **space_id** — leave blank to create a new agent; set it to update an
      existing one instead of creating a duplicate
+   - **create_agent** — `yes` to create/update the agent; `no` if someone else
+     owns that step
 5. **Run all**
 
 The last cell prints the agent's URL. Open it and ask a question.
@@ -140,67 +140,51 @@ works wherever you put the Git folder. It also checks your audit visibility
 (egress restrictions, no Git folder support, air-gapped):
 
 ```bash
-python genie-agent/deploy/install.py \
-  --profile <your-cli-profile> \
-  --catalog main \
-  --warehouse-id <your-sql-warehouse-id>
+python genie-agent/deploy/install.py --profile <your-cli-profile>
+# optional: --warehouse-id <id>   (else a default is auto-selected)
+# update in place: --space-id <existing-space-id>
 ```
 
 Requires the Databricks CLI configured locally, and a clone of this repo. Same
 result — it just runs from your machine instead of the workspace.
 
-Both are re-runnable: functions are `CREATE OR REPLACE`, and `--space-id` (CLI) or
-the `space_id` widget (notebook) updates an existing agent rather than creating a
-second one. Re-run either after a `git pull`.
+Both are re-runnable: the agent's embedded queries are rebuilt from
+`functions/*.sql` on every run, and `--space-id` (CLI) or the `space_id` widget
+(notebook) updates an existing agent rather than creating a second one. Re-run
+either after a `git pull`.
 
-Use a catalog your security team owns. The functions only read audit data, but
-**anyone granted `EXECUTE` can read audit data through them**, so scope grants to
-your security team rather than `account users`.
-
-**If you install by hand instead**, run each file in [`functions/`](functions/)
-after find-and-replacing `${CATALOG}` and `${SCHEMA}`. **Replace the placeholders —
-do not substitute a leading `USE CATALOG`.** A bare `CREATE FUNCTION` lands in
-whatever catalog the session defaults to, often `hive_metastore`, and a function
-there cannot reference the Unity Catalog table `system.access.audit`. It fails with
-`UC_COMMAND_NOT_SUPPORTED`, an error that never mentions the session catalog.
+There is no Unity Catalog object to grant on — the agent embeds the detection SQL
+and Genie runs it as the **asking user**, so a user sees only what their own
+grants on `system.access.audit` allow. Share the agent with your security team,
+and grant audit-log read access accordingly.
 
 ### Step 3.3 — Confirm and smoke-test
 
-The notebook does this for you (step 4 of the notebook). Manually:
-
-```sql
-SHOW USER FUNCTIONS IN main.security_detections;   -- expect 34
-
-SELECT * FROM main.security_detections.detect_config_changes_high_priority(
-  current_timestamp() - INTERVAL 90 DAYS, current_timestamp())
-ORDER BY event_time DESC LIMIT 20;
-```
-
-Rows → working. No rows → not necessarily broken; see
+The notebook does this for you: step 4 runs every embedded query for the last 90
+days and reports which returned data. The installer then prints the agent URL —
+open it and ask a question. Some detections legitimately return no rows because
+those events do not occur in your account; no rows is not necessarily broken — see
 [Troubleshooting](#8-troubleshooting).
 
 ## 4. Create the agent
 
-`install.py` does this for you. This section is for doing it by hand, or for
-understanding what the script created.
+The installer (notebook or `install.py`) does this for you — it builds the whole
+space, every detection embedded as an example query, in one API call. This section
+is for understanding what it created.
 
-In the Databricks UI:
+The agent's configuration is:
 
-1. **Genie** → create a new agent, e.g. *Databricks Security Audit Investigator*
-2. **Sources** → add `system.access.audit` (and `system.query.history` if you want
-   `detect_data_movement_sql_queries`). Note the Sources picker lists **tables and
-   views only** — your functions will not appear here, and that is expected.
-3. **Configure → Instructions** → paste
-   [`agent/instructions.md`](agent/instructions.md) in full
-4. **Configure → Examples** → this is where the SQL functions go. There is no
-   one-click "add function": each one is a saved parameterised query. Per
-   function you supply a name, a `SELECT * FROM <catalog>.<schema>.<fn>(:start_time,
-   :end_time)` body, both parameters as **Date and Time**, and Usage Guidance
-   text. Budget a couple of minutes each — which is the main reason `install.py`
-   exists.
-5. Save, and share with your security team
+1. **Sources** → `system.access.audit` (and `system.query.history` for
+   `detect_data_movement_sql_queries`).
+2. **Instructions** → [`agent/instructions.md`](agent/instructions.md), verbatim.
+3. **Examples** (the UI label for Genie **Trusted Assets**) → one saved,
+   parameterised query per detection: a name, the detection's SQL with
+   `:start_time` / `:end_time` binds, both parameters typed **Date and Time**, and
+   Usage Guidance text (the `Use for:` phrasings). The installer inlines each
+   detection's SQL from `functions/*.sql`; doing this by hand for every detection
+   is impractical, which is the main reason the installer exists.
 
-The docs call these **Trusted Assets**; the UI label is **Examples**. Same thing.
+Share the agent with your security team.
 
 ## 5. Check it works
 
@@ -386,12 +370,13 @@ genie-agent/
 └── docs/          DEPLOY.md (terse runbook), PORTING.md (what was ported + traps)
 ```
 
-**Why SQL functions and not the notebooks.** A Genie Agent selects between
-Trusted Assets — "parameterized example queries and SQL functions whose exact
-logic has been verified" — and cannot call a PySpark `@detect` function. So the
-detections are re-expressed as UC SQL. Confirmed while surveying the set: no
-detection uses `lib/common.py`'s GeoIP/pandas-UDF helpers, so all 34 are
-SQL-portable.
+**Why SQL and not the notebooks.** A Genie Agent's Trusted Assets are
+"parameterized example queries and SQL functions whose exact logic has been
+verified" — it cannot call a PySpark `@detect` function. So each detection is
+authored as SQL in `functions/*.sql` and inlined into the agent as an embedded
+example query at build time (see [`docs/PORTING.md`](docs/PORTING.md)). Confirmed
+while surveying the set: no detection uses `lib/common.py`'s GeoIP/pandas-UDF
+helpers, so all are SQL-portable.
 
 **Regenerate the detection catalog** after editing any notebook's metadata:
 
@@ -402,16 +387,13 @@ python genie-agent/tools/extract_detection_metadata.py --repo-root . \
 
 Exits non-zero if a notebook fails to parse, so CI catches silent under-coverage.
 
-**Verification status.** The original 33 functions were installed and executed
-against a live Databricks production workspace (90-day window, 2026-08-26): 33/33
-created, 33/33 executed without error, 19 returning data and 14 legitimately
-empty. The 34th, `detect_encoded_command_execution`, was added later (port of
-PR #10) and validated live on 2026-09-03: both source branches execute, the
-dual-source schema is correct, and the filter was proven to fire on known
-UNHEX/xxd/base64/printf payloads while rejecting benign hex ids, `sha2`, bare
-`printf` and `mkdir -p`. Every `request_params` key is verified against live data
-rather than the REST API docs — they differ, and a wrong key returns NULL rather
-than erroring. Keys are listed at the top of each SQL file.
+**Verification status.** All detections were validated against a live workspace
+(90-day window): every one executed without error, some returning data and some
+legitimately empty because those events do not occur there. The embedded queries
+were additionally checked against the same logic run as UC functions over the same
+window — identical row sets. Every `request_params` key is verified against live
+data rather than the REST API docs — they differ, and a wrong key returns NULL
+rather than erroring. Keys are listed at the top of each SQL file.
 
 **Coverage: 34 functions.** 33 cover the 35 detections in this repo — fewer
 functions than detections because four near-identical notebooks were merged into
@@ -419,9 +401,9 @@ two: `mfa_key_added` + `mfa_key_deleted` → `detect_mfa_key_changes`, and the f
 group notebooks → `detect_group_changes`. Genie selects better from one
 well-described function than from several near-duplicates, and both directions of
 a change answer the same investigative question. The 34th,
-`detect_encoded_command_execution`, pairs with David Veuve's PR #10 (which adds
-the scheduled-notebook counterpart under `base/detections/behavioral/`): install
-the function now, and the two land together when #10 merges.
+`detect_encoded_command_execution`, is the interactive-query counterpart to the
+scheduled-notebook detection from PR #10
+(`base/detections/behavioral/encoded_command_execution.py`, already in `main`).
 
 **Two deliberate deviations from the notebooks**, both documented inline:
 `detect_admin_sql_activity_spike` reports a threshold count rather than the
