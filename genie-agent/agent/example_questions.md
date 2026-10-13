@@ -142,6 +142,17 @@ WHERE source_ip_address = '203.0.113.42'
 ORDER BY event_time
 ```
 
+**"What did this leaked token actually do?"**
+```sql
+-- Links each tokenLogin / oidcTokenAuthorization to the audited action of the
+-- same request (by request_id). A NULL action = the request did nothing audited
+-- (usually a read-only call) -- not proof it did nothing. Pass a token ID (or its
+-- first 10+ characters), or a service principal application ID / user email.
+SELECT *
+FROM <catalog>.security_detections.detect_credential_request_actions(
+  current_timestamp() - INTERVAL 90 DAYS, current_timestamp(), '<token_id>')
+```
+
 **"Which config changes came from automation vs the console?"**
 ```sql
 -- user_agent separates Terraform/CLI/SDK from console clicks. A change from an

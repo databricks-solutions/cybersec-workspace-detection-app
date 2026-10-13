@@ -67,6 +67,9 @@ one actor's entire history.
    `accountIpAclsValidationFailed`) preceded them.
    - Lead *IP*: the sensitive actions and identities from it — not every request.
    - Lead *session*: whether it was used from more than one IP or device.
+   - Lead *token or service principal*: what each request it authenticated
+     actually did — `detect_credential_request_actions` with the token ID or the
+     principal's application ID (see linking by `request_id`, below).
 4. **Build the timeline.** Order the correlated events attempt → change → effect
    (e.g. denials from an IP stop right after that actor widens the allow list).
    `user_agent` separates console clicks from Terraform/CLI/SDK automation — and a
@@ -121,6 +124,37 @@ NULL for every row, which reads as "the list was empty."
 Some events *do* carry values: `setSetting` has `settingValueForAudit` (note
 `settingName` is often empty while `settingTypeName` holds the meaningful
 identifier), and `workspaceConfEdit` has `workspaceConfValues`.
+
+**Link a login to what it did by `request_id`, never `session_id`.** A
+`tokenLogin` (PAT) or `oidcTokenAuthorization` (OAuth access token) event says a
+credential was used, not what the request did. Every token-authenticated API
+request emits exactly one such login event, and if that request also performed an
+audited action, the action's event carries the **same `request_id`**. For "what
+did this token / service principal do?", run the trusted
+`detect_credential_request_actions` — it does this join with every detail below
+already encoded. If you must hand-roll it: self-join `system.access.audit` on
+`request_id` and `event_date` (allowing the next day, for requests that straddle
+UTC midnight), exclude the login row itself, and do not filter the action side by
+workspace — account-level actions (Unity Catalog, service principal credentials)
+log with `workspace_id = 0`. Never join on `session_id`: it is NULL on
+token-authenticated traffic, so the join returns nothing and reads as "the token
+did nothing."
+- A login with **no** matching action means the request did nothing *audited* —
+  most often a read-only call (listing clusters, jobs, tokens, `scim/v2/Me`),
+  most of which the audit log does not record. Report it as "no audited action,"
+  never "no activity." Some reads *are* audited (e.g. Unity Catalog `getTable`),
+  so say "most read-only calls are not audited," not "reads are not audited."
+- Exclude `request_params['authenticationMethod'] = 'API_INT_PAT_TOKEN'` when
+  judging whether a leaked credential was used: those are internal cluster
+  credentials for jobs and commands running *as* the principal, not use of its
+  PAT or secret. An external PAT is `API_EXT_PAT_TOKEN`; OAuth is
+  `API_OIDC_TOKEN`. On `oidcTokenAuthorization`, `tokenId` is the hash of the
+  minted access token, not of the service principal's secret.
+- A PAT can be exchanged for an OAuth token (`mintOAuthToken` with a
+  token-exchange `grant_type`), and later use of the exchanged token logs as
+  `oidcTokenAuthorization` under the principal, not as `tokenLogin`. So when
+  following a leaked PAT, also follow its owner's OAuth use (pass the owner's
+  application ID or email) before concluding the token went unused.
 
 **Distinguish success from attempt.** `response.status_code` and the dedicated
 failure actions (`accountIpAclsValidationFailed`, `IpAccessDenied`) separate what

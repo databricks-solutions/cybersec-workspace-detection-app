@@ -49,7 +49,7 @@ calls them**, so all are SQL-portable today.
 | `00_investigation_triage.sql` | 1 | *not a detection* — the investigation-mode entry point (see below) |
 | `01_ip_access_and_config.sql` | 5 | IP access lists, high-priority + account-level config, denied logons |
 | `02_identity_and_access.sql` | 15 | tokens, admin grants (account/workspace/metastore), user lifecycle, roles, passwords, MFA, groups, non-SSO + employee logon, SSO config |
-| `03_data_movement_and_secrets.sql` | 9 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike, encoded command execution |
+| `03_data_movement_and_secrets.sql` | 10 | storage credentials, COPY INTO, downloads, bulk notebook export, secrets discovery, credential scanners, token scanning, admin SQL spike, encoded command execution — plus the credential-request pivot (*not a detection*, see below) |
 | `04_sessions_and_config.sql` | 5 | session hijacking ×3, verbose-audit-logging evasion, workspace config |
 
 ### The investigation-triage asset (not a detection)
@@ -79,6 +79,25 @@ outrank it. That distributed shape surfaces in IP/token concentration, not
 per-actor breadth, which is why the pivot step ranks on the shared IP/token for
 that case. Triage is one lens, not the whole investigation. See
 `agent/instructions.md` for the loop it anchors.
+
+### The credential-request pivot (not a detection)
+
+`detect_credential_request_actions` (in `03_data_movement_and_secrets.sql`, next to
+`detect_token_scanning_activity`) answers the question that follows a leaked-token
+finding: *what did each request made with this credential actually do?* A
+`tokenLogin` / `oidcTokenAuthorization` event records only that a credential was
+used. The request's audited action, if it had one, is a separate event sharing the
+same `request_id` — so the asset joins on `request_id`. It never joins on
+`session_id`, which is NULL on token-authenticated traffic (verified live: 0 of
+~790k token-login events in a 7-day window carry one). A login with no matching
+action is a request that did nothing *audited* — usually a read-only call, most of
+which are not audited — and the asset reports it as a NULL action rather than
+dropping it. Internal cluster credentials (`API_INT_PAT_TOKEN`) are excluded, the
+action side is not filtered by workspace (account-level actions log with
+`workspace_id = 0`), and results are aggregated per client and action so a busy
+service principal still returns a compact result. It takes a third, STRING
+parameter (`:credential`): a token ID or prefix of at least 10 characters, or a
+principal's application ID / email, to follow OAuth use.
 
 Some near-identical notebooks were merged deliberately: `mfa_key_added` +
 `mfa_key_deleted` → `detect_mfa_key_changes`, and the four group notebooks →
