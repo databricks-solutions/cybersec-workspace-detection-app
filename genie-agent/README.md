@@ -221,7 +221,8 @@ from how you phrase the request; the two sections below are the examples for eac
 
 ### Answer mode — a specific question
 
-**34 functions covering the detections in this repo.** By theme:
+**34 functions covering the detections in this repo**, plus two investigation
+helpers (triage, and the credential-request pivot). By theme:
 
 **IP access & network** — who changed the IP allow list; who deleted a list;
 failed attempts to change IP rules; who was blocked and what they were reaching
@@ -233,7 +234,8 @@ changes; MFA keys added or removed; group creation, deletion and membership.
 
 **Credentials** — who created a personal access token and how long it lives;
 revoked tokens; tokens presenting from many IPs (leaked-token signal); credential
-scanners like TruffleHog.
+scanners like TruffleHog; and what each request made with a given token or
+service principal actually did.
 
 **Authentication** — logins that bypassed SSO; Databricks employee (support)
 access; SSO/IdP configuration changes.
@@ -336,6 +338,18 @@ cannot give them the before/after IP values for a past change. Say so early.*
 Audit logs record what was *submitted*, not a before/after pair. Account-level
 settings are the exception — those carry `settingValueForAudit`, the new value.
 
+### A token login doesn't say what the request did — and most reads aren't logged
+
+A `tokenLogin` (personal access token) or `oidcTokenAuthorization` (OAuth) event
+records only that a credential was used. If the same request did something the
+audit log records, that action is a separate event with the same `request_id`
+(the agent's `detect_credential_request_actions` joins them). If there is no
+matching event, the request did nothing *audited* — most often a read-only call
+such as listing clusters, jobs or tokens, which the audit log does not record at
+all. SQL run over a JDBC/ODBC or SQL-connector connection isn't linked this way
+either; look in `system.query.history` for that. So you **can** say "none of this token's requests changed anything that is
+audited"; you **cannot** say "this token did nothing."
+
 ### Severity is a hint, not a verdict
 
 `HIGH` means "look at this first," not "this was an attack." Administrators
@@ -400,7 +414,7 @@ Layout:
 
 ```
 genie-agent/
-├── functions/     35 SQL queries in 5 files: 34 detections + 1 investigation-triage helper
+├── functions/     36 SQL queries in 5 files: 34 detections + 2 investigation helpers
 ├── agent/         instructions, example questions, serialized_space template
 ├── deploy/        install_notebook (recommended) + install.py (CLI fallback)
 ├── tools/         metadata extractor
@@ -442,13 +456,19 @@ a change answer the same investigative question. The 34th,
 scheduled-notebook detection from PR #10
 (`base/detections/behavioral/encoded_command_execution.py`, already in `main`).
 
-**Plus one investigation-triage helper** (`detect_investigation_triage`,
-`functions/00_investigation_triage.sql`) — *not* a detection, but the entry point
-for investigation mode. It ranks actors and their source IPs by the breadth of
+**Plus two investigation helpers**, neither a detection. The triage helper
+(`detect_investigation_triage`, `functions/00_investigation_triage.sql`) is the
+entry point for investigation mode. It ranks actors and their source IPs by the breadth of
 distinct security-sensitive action types they touched (excluding routine logins),
 so the lead surfaces at the top of a small result instead of the analyst having to
 sweep every family by hand. Its sensitive-action set is the union of the action
-names the detections already treat as security-relevant.
+names the detections already treat as security-relevant. The credential-request
+pivot (`detect_credential_request_actions`, in
+`functions/03_data_movement_and_secrets.sql`) takes a token ID or a principal's
+application ID / email and shows what each request it authenticated actually
+did — joining the login event to the audited action of the same request by
+`request_id` (never `session_id`, which is NULL on token traffic). A request with
+no audited action shows as a NULL action, not as nothing.
 
 **Two deliberate deviations from the notebooks**, both documented inline:
 `detect_admin_sql_activity_spike` reports a threshold count rather than the
