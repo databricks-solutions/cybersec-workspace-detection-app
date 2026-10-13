@@ -221,7 +221,8 @@ from how you phrase the request; the two sections below are the examples for eac
 
 ### Answer mode — a specific question
 
-**34 functions covering the detections in this repo.** By theme:
+**34 functions covering the detections in this repo**, plus two investigation
+helpers (triage, and the credential-request pivot). By theme:
 
 **IP access & network** — who changed the IP allow list; who deleted a list;
 failed attempts to change IP rules; who was blocked and what they were reaching
@@ -345,7 +346,8 @@ audit log records, that action is a separate event with the same `request_id`
 (the agent's `detect_credential_request_actions` joins them). If there is no
 matching event, the request did nothing *audited* — most often a read-only call
 such as listing clusters, jobs or tokens, which the audit log does not record at
-all. So you **can** say "none of this token's requests changed anything that is
+all. SQL run over a JDBC/ODBC or SQL-connector connection isn't linked this way
+either; look in `system.query.history` for that. So you **can** say "none of this token's requests changed anything that is
 audited"; you **cannot** say "this token did nothing."
 
 ### Severity is a hint, not a verdict

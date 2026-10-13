@@ -781,9 +781,6 @@
           {
             "name": "credential",
             "type_hint": "STRING",
-            "description": [
-              "A personal access token's token ID (the tokenId hash in the audit log, full or first 10+ characters; not the dapi... secret), or a service principal's application (client) ID or a user's email to follow OAuth use"
-            ],
             "default_value": {
               "values": [
                 ""
@@ -792,7 +789,7 @@
           }
         ],
         "usage_guidance": [
-          "What each API request made with one credential actually did: joins the credential's login events (tokenLogin for a personal access token, oidcTokenAuthorization for a service principal's OAuth access token) to the audited action of the same request by request_id, aggregated per source IP, client and action. A NULL action means those requests performed no audited action -- most often read-only calls, which are not audited -- not that nothing happened. Internal cluster credentials (API_INT_PAT_TOKEN) are excluded. Pass a token ID (or its first 10+ characters), or a service principal application ID or user email to follow OAuth use. Investigation pivot, not a detection. Use for: what did this token do, what did the leaked token access, was the stolen token used to change anything, what actions did this service principal take, follow a credential, token activity, what did the attacker do with the token, link tokenLogin to actions, which requests did this PAT make."
+          "What each API request made with one credential actually did: joins the credential's login events (tokenLogin for a personal access token, oidcTokenAuthorization for a service principal's OAuth access token) to the audited action of the same request by request_id, aggregated per source IP, client and action. A NULL action means those requests performed no audited action -- most often read-only calls, which are not audited -- not that nothing happened. Zero rows means no login matched the credential in the window (wrong ID, a dapi... secret instead of the token ID, or the wrong window) -- not that it went unused. Internal cluster credentials (API_INT_PAT_TOKEN) are excluded. Pass a token ID (or its first 10+ characters), or a service principal application ID or user email to follow OAuth use. Investigation pivot, not a detection. Use for: what did this token do, what did the leaked token access, was the stolen token used to change anything, what actions did this service principal take, follow a credential, token activity, what did the attacker do with the token, link tokenLogin to actions, which requests did this PAT make."
         ]
       },
       {

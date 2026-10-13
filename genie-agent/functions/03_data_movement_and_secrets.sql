@@ -280,10 +280,12 @@ RETURN
 -- principal). No notebook counterpart.
 --
 -- A tokenLogin (PAT) or oidcTokenAuthorization (OAuth access token) event says
--- a credential was used, not what the request did. Every token-authenticated
--- API request emits exactly one such login event; if the same request also
+-- a credential was used, not what the request did. Each token-authenticated
+-- REST API request emits one such login event; if the same request also
 -- performed an AUDITED action, that action's event carries the same
--- request_id. So the join is on request_id -- never session_id, which is NULL
+-- request_id. (Session-based clients -- JDBC/ODBC, the SQL connector --
+-- authenticate per connection, so the statements they run are not linked
+-- here; check system.query.history for the principal too.) So the join is on request_id -- never session_id, which is NULL
 -- on token-authenticated traffic (verified live: 0 of ~790k tokenLogin /
 -- oidcTokenAuthorization events in a 7-day window carry one).
 --
@@ -296,15 +298,23 @@ RETURN
 --     (Unity Catalog, service principal credentials) log with workspace_id = 0.
 --   * The action side may fall on the next event_date, so a request straddling
 --     UTC midnight still pairs.
+--   * event_date is the UTC date but to_date() uses the session time zone, so
+--     the partition bounds are widened a day each way; event_time keeps the
+--     window exact.
 --   * API_INT_PAT_TOKEN logins are excluded: they are internal cluster
 --     credentials for jobs and commands running AS the principal, not use of
 --     its PAT or secret.
 --   * The CLI's per-invocation `cmd-exec-id/<uuid>` is stripped from the
 --     user agent, so one client groups as one row rather than one per command.
 --   * `credential` shorter than 10 characters matches nothing, so an empty or
---     truncated parameter cannot turn into a scan of every login.
+--     truncated parameter cannot turn into a scan of every login. Matching is
+--     case-insensitive. ZERO rows therefore means no login matched -- a wrong
+--     ID, a dapi... secret instead of the token ID, or the wrong window -- not
+--     that the credential went unused.
 -- Results are aggregated per client and action so a busy credential still
 -- returns a compact result; sample_request_id pulls the raw events for a row.
+-- Capped at 200 groups, audited actions first -- a credential used from very
+-- many IPs/clients can lose NULL-action rows to the cap; narrow the window.
 --
 -- Verified live 2026-10-12: an external PAT's two curl requests returned one
 -- row with no audited action; a busy OAuth service principal over 7 days
@@ -330,7 +340,7 @@ RETURNS TABLE (
   last_seen         TIMESTAMP COMMENT 'Last request in this group (UTC)',
   sample_request_id STRING    COMMENT 'One request_id from this group, to pull its raw events'
 )
-COMMENT 'What each API request made with one credential actually did: joins the credential''s login events (tokenLogin for a personal access token, oidcTokenAuthorization for a service principal''s OAuth access token) to the audited action of the same request by request_id, aggregated per source IP, client and action. A NULL action means those requests performed no audited action -- most often read-only calls, which are not audited -- not that nothing happened. Internal cluster credentials (API_INT_PAT_TOKEN) are excluded. Pass a token ID (or its first 10+ characters), or a service principal application ID or user email to follow OAuth use. Investigation pivot, not a detection. Use for: what did this token do, what did the leaked token access, was the stolen token used to change anything, what actions did this service principal take, follow a credential, token activity, what did the attacker do with the token, link tokenLogin to actions, which requests did this PAT make.'
+COMMENT 'What each API request made with one credential actually did: joins the credential''s login events (tokenLogin for a personal access token, oidcTokenAuthorization for a service principal''s OAuth access token) to the audited action of the same request by request_id, aggregated per source IP, client and action. A NULL action means those requests performed no audited action -- most often read-only calls, which are not audited -- not that nothing happened. Zero rows means no login matched the credential in the window (wrong ID, a dapi... secret instead of the token ID, or the wrong window) -- not that it went unused. Internal cluster credentials (API_INT_PAT_TOKEN) are excluded. Pass a token ID (or its first 10+ characters), or a service principal application ID or user email to follow OAuth use. Investigation pivot, not a detection. Use for: what did this token do, what did the leaked token access, was the stolen token used to change anything, what actions did this service principal take, follow a credential, token activity, what did the attacker do with the token, link tokenLogin to actions, which requests did this PAT make.'
 RETURN
   WITH logins AS (
     SELECT
@@ -344,13 +354,13 @@ RETURN
       regexp_replace(l.user_agent, ' cmd-exec-id/[^ ]+', '') AS user_agent
     FROM system.access.audit AS l
     WHERE l.event_time BETWEEN start_time AND end_time
-      AND l.event_date BETWEEN to_date(start_time) AND to_date(end_time)
+      AND l.event_date BETWEEN date_sub(to_date(start_time), 1) AND date_add(to_date(end_time), 1)
       AND length(trim(credential)) >= 10
       AND COALESCE(l.request_params['authenticationMethod'], '') <> 'API_INT_PAT_TOKEN'
       AND ((l.action_name = 'tokenLogin'
-            AND startswith(l.request_params['tokenId'], trim(credential)))
+            AND startswith(lower(l.request_params['tokenId']), lower(trim(credential))))
         OR (l.action_name = 'oidcTokenAuthorization'
-            AND l.user_identity.email = trim(credential)))
+            AND lower(l.user_identity.email) = lower(trim(credential))))
   )
   SELECT
     g.principal,
@@ -369,10 +379,10 @@ RETURN
   LEFT JOIN system.access.audit AS a
     ON a.request_id = g.request_id
    AND a.event_date BETWEEN g.event_date AND date_add(g.event_date, 1)
-   AND a.event_date BETWEEN to_date(start_time) AND date_add(to_date(end_time), 1)
+   AND a.event_date BETWEEN date_sub(to_date(start_time), 1) AND date_add(to_date(end_time), 2)
    AND a.action_name NOT IN ('tokenLogin', 'oidcTokenAuthorization')
   GROUP BY ALL
-  ORDER BY action IS NULL, requests DESC
+  ORDER BY action IS NULL, requests DESC, first_seen
   LIMIT 200;
 
 -- --------------------------------------------------------------------------

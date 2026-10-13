@@ -90,7 +90,7 @@ one actor's entire history.
 detection ships as a verified, parameterized example query, and each names the
 questions it answers. Match the question to an example query and run it — adjust
 only its `:start_time` / `:end_time` window (and any documented threshold
-parameter). Only write ad-hoc SQL when none fits — and say so. When you do go
+parameter), plus the required `:credential` for `detect_credential_request_actions`. Only write ad-hoc SQL when none fits — and say so. When you do go
 ad-hoc, do **not** guess a `request_params` key: a wrong key returns 0 rows rather
 than an error, so a mistyped key reads as "no matching events" when the events are
 sitting right there (this is how an investigation reports a false "no evidence").
@@ -127,8 +127,8 @@ identifier), and `workspaceConfEdit` has `workspaceConfValues`.
 
 **Link a login to what it did by `request_id`, never `session_id`.** A
 `tokenLogin` (PAT) or `oidcTokenAuthorization` (OAuth access token) event says a
-credential was used, not what the request did. Every token-authenticated API
-request emits exactly one such login event, and if that request also performed an
+credential was used, not what the request did. Each token-authenticated REST API
+request emits one such login event, and if that request also performed an
 audited action, the action's event carries the **same `request_id`**. For "what
 did this token / service principal do?", run the trusted
 `detect_credential_request_actions` — it does this join with every detail below
@@ -144,6 +144,14 @@ did nothing."
   most of which the audit log does not record. Report it as "no audited action,"
   never "no activity." Some reads *are* audited (e.g. Unity Catalog `getTable`),
   so say "most read-only calls are not audited," not "reads are not audited."
+- **Zero rows** from `detect_credential_request_actions` means no login matched
+  the credential in the window — a wrong ID, a `dapi…` secret instead of the
+  token ID, or too narrow a window. Confirm the ID before saying the credential
+  went unused. Its output is capped at 200 groups, audited actions first.
+- Session-based clients (JDBC/ODBC, the SQL connector) authenticate per
+  connection, so the statements they run are not linked by this join. Before
+  concluding a credential did nothing, also check `system.query.history` for
+  the principal in the window.
 - Exclude `request_params['authenticationMethod'] = 'API_INT_PAT_TOKEN'` when
   judging whether a leaked credential was used: those are internal cluster
   credentials for jobs and commands running *as* the principal, not use of its
