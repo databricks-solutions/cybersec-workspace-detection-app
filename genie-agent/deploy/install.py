@@ -132,6 +132,10 @@ def build_serialized_space() -> str:
     # Load-bearing: the API rejects an unsorted list outright.
     examples.sort(key=lambda e: e["id"])
     space["instructions"]["example_question_sqls"] = examples
+    # Also load-bearing: the API rejects a table whose column_configs are not
+    # sorted by column_name ("Invalid export proto ... must be sorted by column_name").
+    for table in space["data_sources"]["tables"]:
+        table.get("column_configs", []).sort(key=lambda c: c["column_name"])
 
     return json.dumps(space, indent=2)
 
