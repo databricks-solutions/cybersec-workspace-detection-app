@@ -81,17 +81,17 @@
         "identifier": "system.query.history",
         "column_configs": [
           { "column_name": "account_id", "enable_format_assistance": true },
-          { "column_name": "workspace_id", "enable_format_assistance": true },
+          { "column_name": "client_application", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "compute" },
+          { "column_name": "end_time", "enable_format_assistance": true },
+          { "column_name": "executed_as", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "executed_by", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "execution_status", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "start_time", "enable_format_assistance": true },
           { "column_name": "statement_id", "enable_format_assistance": true },
           { "column_name": "statement_text" },
           { "column_name": "statement_type", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "execution_status", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "executed_by", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "executed_as", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "start_time", "enable_format_assistance": true },
-          { "column_name": "end_time", "enable_format_assistance": true },
-          { "column_name": "client_application", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "compute" }
+          { "column_name": "workspace_id", "enable_format_assistance": true }
         ]
       }
     ]
