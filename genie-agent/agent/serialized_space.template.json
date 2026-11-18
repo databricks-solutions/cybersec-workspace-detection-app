@@ -1255,7 +1255,7 @@
           }
         ],
         "usage_guidance": [
-          "Secret discovery behaviour: an identity that both enumerates secret scopes (listScopes) and reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
+          "Secret discovery behaviour: an identity that both enumerates secrets (listScopes, listSecrets or listAcls) and successfully reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Refused secrets calls are returned as secrets_refused for context. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
         ]
       },
       {
