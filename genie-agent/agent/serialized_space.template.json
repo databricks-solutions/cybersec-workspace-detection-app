@@ -598,7 +598,7 @@
           }
         ],
         "usage_guidance": [
-          "Creation or modification of external storage mounts, storage credentials, and external connections (mount, createStorageCredential, updateStorageCredential, createConnection, updateConnection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external connections created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
+          "Creation or modification of external storage mounts, storage credentials, external locations, external connections and foreign catalogs (mount, createStorageCredential, updateStorageCredential, createExternalLocation, updateExternalLocation, createConnection, updateConnection, createCatalog with a connection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Refused attempts are kept (status_code 403): probing for a credential or location the actor cannot create is itself a signal. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external locations created, external connections created, foreign catalog created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
         ]
       },
       {

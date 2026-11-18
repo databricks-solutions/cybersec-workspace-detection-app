@@ -65,7 +65,7 @@
 @detect(output=Output.asDataFrame)
 def potential_data_movement_explicit_creds(earliest: str = None, latest: str = None):
     from pyspark.sql.functions import (col, current_date, date_sub, current_timestamp, 
-                                       expr, to_timestamp)
+                                       expr, to_timestamp, when)
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 2 months")
     latest = latest or current_timestamp()
@@ -76,14 +76,20 @@ def potential_data_movement_explicit_creds(earliest: str = None, latest: str = N
         'createStorageCredential', 
         'updateStorageCredential',
         'createConnection',
-        'updateConnection'
+        'updateConnection',
+        # An external location binds a storage credential to a cloud path: the step that
+        # lets data be written outside governed storage.
+        'createExternalLocation',
+        'updateExternalLocation'
     ]
     
     df = spark.table("system.access.audit")
     
     # Filter for data movement actions with potential explicit credentials
     df_filtered = df.filter(
-        (col("action_name").isin(suspicious_actions)) &
+        (col("action_name").isin(suspicious_actions) |
+         # Foreign catalog (Lakehouse Federation): createCatalog with a connection.
+         ((col("action_name") == "createCatalog") & col("request_params.connection_name").isNotNull())) &
         (col("event_time").between(earliest, latest))
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_TIME"),
@@ -92,6 +98,9 @@ def potential_data_movement_explicit_creds(earliest: str = None, latest: str = N
         col("user_identity.email").alias("USER_EMAIL"),
         col("user_agent").alias("USER_AGENT"),
         col("source_ip_address").alias("SOURCE_IP_ADDRESS"),
+        # Refused attempts (403) are kept: probing for a credential or location the actor
+        # cannot create is itself a signal.
+        col("response.status_code").alias("STATUS_CODE"),
         col("request_params").alias("REQUEST_PARAMS")
     ).orderBy(col("EVENT_TIME").desc())
     

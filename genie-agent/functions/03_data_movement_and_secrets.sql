@@ -14,7 +14,9 @@
 -- Port of behavioral/potential_data_movement_explicit_creds.py.
 --
 -- The action set is the notebook's: mount, create/updateStorageCredential,
--- create/updateConnection. These are the control-plane operations that attach
+-- create/updateExternalLocation, create/updateConnection, and createCatalog
+-- when it carries a connection_name (a foreign catalog). These are the
+-- control-plane operations that attach
 -- EXTERNAL storage or a foreign system -- the plumbing an exfiltration path
 -- needs before any data moves. Verified live: updateConnection (33),
 -- createConnection (15).
@@ -29,25 +31,29 @@ CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_data_movement_explicit_cr
 RETURNS TABLE (
   event_time   TIMESTAMP COMMENT 'When the operation happened (UTC)',
   service_name STRING    COMMENT 'Emitting service',
-  action       STRING    COMMENT 'mount / createStorageCredential / updateStorageCredential / createConnection / updateConnection',
+  action       STRING    COMMENT 'mount / create|updateStorageCredential / create|updateExternalLocation / create|updateConnection / createCatalog (foreign)',
+  status_code  INT       COMMENT 'Response status. 403 = refused attempt, still a signal',
   actor        STRING    COMMENT 'Identity that performed it',
   source_ip    STRING    COMMENT 'IP the request came from',
   user_agent   STRING    COMMENT 'Client used',
   request_params MAP<STRING, STRING> COMMENT 'Target of the mount/credential/connection -- inspect for the external destination'
 )
-COMMENT 'Creation or modification of external storage mounts, storage credentials, and external connections (mount, createStorageCredential, updateStorageCredential, createConnection, updateConnection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external connections created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration.'
+COMMENT 'Creation or modification of external storage mounts, storage credentials, external locations, external connections and foreign catalogs (mount, createStorageCredential, updateStorageCredential, createExternalLocation, updateExternalLocation, createConnection, updateConnection, createCatalog with a connection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Refused attempts are kept (status_code 403): probing for a credential or location the actor cannot create is itself a signal. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external locations created, external connections created, foreign catalog created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration.'
 RETURN
   SELECT
     a.event_time,
     a.service_name,
     a.action_name,
+    a.response.status_code,
     a.user_identity.email,
     a.source_ip_address,
     a.user_agent,
     a.request_params
   FROM system.access.audit AS a
-  WHERE a.action_name IN ('mount', 'createStorageCredential', 'updateStorageCredential',
-                          'createConnection', 'updateConnection')
+  WHERE (a.action_name IN ('mount', 'createStorageCredential', 'updateStorageCredential',
+                           'createExternalLocation', 'updateExternalLocation',
+                           'createConnection', 'updateConnection')
+         OR (a.action_name = 'createCatalog' AND a.request_params['connection_name'] IS NOT NULL))
     AND a.event_time BETWEEN start_time AND end_time;
 
 -- --------------------------------------------------------------------------
