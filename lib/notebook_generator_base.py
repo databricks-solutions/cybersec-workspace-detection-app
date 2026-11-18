@@ -225,8 +225,8 @@ def discover_detections(base_path: str = None, detection_list: List[str] = None,
         print(f"Repo root: {repo_root}")
         print(f"Scanning for detections in {detections_base}...")
 
-        # Scan both binary and behavioral subdirectories
-        for subdir in ["binary", "behavioral"]:
+        # Scan both event-based and behavioral subdirectories
+        for subdir in ["event-based", "behavioral"]:
             detections_dir = os.path.join(detections_base, subdir)
 
             try:
