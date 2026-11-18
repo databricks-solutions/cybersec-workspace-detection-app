@@ -227,7 +227,7 @@ RETURN
     );
 
 -- -----------------------------------------------------------------------------
--- Account-level settings changes (setSetting).
+-- Account-level settings changes (setSetting and deleteSetting).
 --
 -- Port of configuration_changes_account_level.py. That notebook selects
 -- request_params wholesale; the real keys are settingName, settingTypeName,
@@ -251,6 +251,8 @@ CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_config_changes_account_le
 RETURNS TABLE (
   event_time     TIMESTAMP COMMENT 'When the change was made (UTC)',
   service_name   STRING    COMMENT 'Emitting service',
+  action         STRING    COMMENT 'setSetting or deleteSetting',
+  severity       STRING    COMMENT 'High for account IP access list / network policy settings, else Informational',
   setting_name   STRING    COMMENT 'Which setting was changed',
   setting_key    STRING    COMMENT 'Key within that setting',
   new_value      STRING    COMMENT 'Audit-safe rendering of the new value',
@@ -260,11 +262,13 @@ RETURNS TABLE (
   user_agent     STRING    COMMENT 'Client used',
   request_params MAP<STRING, STRING> COMMENT 'Raw payload, for evidence'
 )
-COMMENT 'Account-level setting changes (setSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. Use for: account level configuration changes, account settings modified, what changed at the account level, setSetting events, account-wide config changes, who changed an account setting.'
+COMMENT 'Account-level setting changes and deletions (setSetting and deleteSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. severity is High for account IP access list and network policy settings (acct_ip_acl_rule, acct_ip_acl_enable, network_policy, network_policy_binding): deleting or loosening them removes network controls everywhere. Use for: account level configuration changes, account settings modified or deleted, what changed at the account level, setSetting, deleteSetting, account IP access list rule deleted, network policy changed, account-wide config changes, who changed an account setting.'
 RETURN
   SELECT
     a.event_time,
     a.service_name,
+    a.action_name,
+    CASE WHEN a.request_params['settingTypeName'] IN ('acct_ip_acl_rule', 'acct_ip_acl_enable', 'network_policy', 'network_policy_binding') THEN 'High' ELSE 'Informational' END,
     a.request_params['settingName'],
     a.request_params['settingKeyName'],
     a.request_params['settingValueForAudit'],
@@ -275,7 +279,7 @@ RETURN
     a.request_params
   FROM system.access.audit AS a
   WHERE a.audit_level = 'ACCOUNT_LEVEL'
-    AND a.action_name = 'setSetting'
+    AND a.action_name IN ('setSetting', 'deleteSetting')
     AND a.event_time BETWEEN start_time AND end_time;
 
 -- -----------------------------------------------------------------------------
