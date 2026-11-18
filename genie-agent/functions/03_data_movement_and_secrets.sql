@@ -515,13 +515,15 @@ RETURN
     FROM baseline
     GROUP BY actor
   )
+  -- Every output column is named here, not only by the caller's column list: the Lakewatch
+  -- rule runtime drops a derived-table column list, so unnamed items would lose their names.
   SELECT
     d.event_date,
     d.actor,
     d.notebooks_exported,
-    ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1),
-    ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1),
-    ROUND(t.median, 1),
+    ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1) AS threshold_applied,
+    ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1) AS iqrs_from_median,
+    ROUND(t.median, 1) AS baseline_median,
     d.formats_used,
     d.self_home_new_network,
     d.source_ips,
@@ -530,7 +532,7 @@ RETURN
            ', formats: ', d.formats_used,
            CASE WHEN d.self_home_new_network > 0
                 THEN CONCAT(', ', CAST(d.self_home_new_network AS STRING), ' from own home on a new network') ELSE '' END,
-           ')')
+           ')') AS analysis
   FROM per_user_day AS d
   LEFT JOIN per_user_threshold AS t ON d.actor = t.actor
   WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE))
