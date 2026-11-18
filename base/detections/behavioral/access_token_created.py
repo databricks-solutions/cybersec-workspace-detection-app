@@ -46,6 +46,8 @@
 # MAGIC     required_columns:
 # MAGIC     - EVENT_DATE
 # MAGIC     - TOKEN_LIFETIME_DAYS
+# MAGIC     - TOKEN_LIFETIME_HOURS
+# MAGIC     - NO_EXPIRY
 # MAGIC     - action_name
 # MAGIC     - audit_level
 # MAGIC     - event_time
@@ -63,7 +65,7 @@
 @detect(output=Output.asDataFrame)
 def access_token_created(earliest:str = None, latest: str = None):
     from pyspark.sql.functions import (col, current_date, date_sub, to_date, current_timestamp, 
-                                       expr, unix_timestamp, round, from_unixtime, when, to_timestamp)
+                                       expr, unix_timestamp, round, from_unixtime, when, to_timestamp, coalesce, lit)
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 24 hours")
     latest = latest or current_timestamp()
@@ -79,20 +81,29 @@ def access_token_created(earliest:str = None, latest: str = None):
     df_filtered = df.filter(
         (col("service_name") == "accounts") &
         (col("action_name").isin("generateDbToken")) &
-        (~col("user_agent").rlike(known_ua_regex)) &
-        (~col("source_ip_address").rlike(known_src_ips_regex)) &
+        (~coalesce(col("user_agent"), lit("")).rlike(known_ua_regex)) &
+        (~coalesce(col("source_ip_address"), lit("")).rlike(known_src_ips_regex)) &
         (col("event_time").between(earliest, latest))
     ).withColumn(
-        "TOKEN_LIFETIME_DAYS",
-        round(((unix_timestamp(from_unixtime(col("request_params.tokenExpirationTime") / 1000)) - unix_timestamp(col("event_time"))) / 3600 / 24),0)
+        # Lifetime in hours. tokenExpirationTime is epoch milliseconds; a null, zero or
+        # negative value means the token never expires -- the most dangerous case, so it is
+        # kept and labelled rather than dropped. (Rounding to whole days and filtering > 0
+        # used to drop both no-expiry tokens and tokens living under 12 hours.)
+        "TOKEN_LIFETIME_HOURS",
+        when(col("request_params.tokenExpirationTime").cast("bigint") > 0,
+             round((col("request_params.tokenExpirationTime").cast("bigint") / 1000
+                    - unix_timestamp(col("event_time"))) / 3600, 2))
+    ).withColumn(
+        "NO_EXPIRY", col("TOKEN_LIFETIME_HOURS").isNull()
     )
-    
-    df_filtered = df_filtered.filter(col("TOKEN_LIFETIME_DAYS") > 0
-    ).select(
+
+    df_filtered = df_filtered.select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
         col("action_name").alias("ACTION"),
         when(col("response.status_code") == 200, "Success").otherwise("Failure").alias("STATUS"),
-        col("TOKEN_LIFETIME_DAYS"),
+        round(col("TOKEN_LIFETIME_HOURS") / 24, 2).alias("TOKEN_LIFETIME_DAYS"),
+        col("TOKEN_LIFETIME_HOURS"),
+        col("NO_EXPIRY"),
         col("audit_level").alias("AUDIT_LEVEL"),
         col("source_ip_address").alias("SRC_IP"),
         col("user_identity.email").alias("SRC_USER"),
