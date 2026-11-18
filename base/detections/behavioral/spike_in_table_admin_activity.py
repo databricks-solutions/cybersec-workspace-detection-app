@@ -77,14 +77,16 @@
 # COMMAND ----------
 
 @detect(output=Output.asDataFrame)
-def spikes_in_admin_activity(earliest: str, latest: str, threshold: int = 0):
+def spikes_in_admin_activity(earliest: str, latest: str, threshold: float = 1.5):
     """
     Identifies spikes in admin activity by analyzing unique queries issued by users.
     
     Args:
         earliest (str): The earliest timestamp to filter events.
         latest (str): The latest timestamp to filter events.
-        threshold (int): Minimum normalized rate threshold (default=0). Rows with a lower rate will be filtered out.
+        threshold (float): Minimum normalized rate (default=1.5, i.e. 50% above the principal's average).
+            Rows at or below it are filtered out. At 0 every matching statement is returned, because
+            RATE is always > 0; the generated notebooks call this with the signature default.
 
     Returns:
         pyspark.sql.DataFrame: Filtered DataFrame with normalized ratio (RATE) and threshold applied.
