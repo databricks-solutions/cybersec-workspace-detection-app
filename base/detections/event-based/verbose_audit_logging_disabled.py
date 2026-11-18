@@ -58,26 +58,30 @@
 @detect(output=Output.asDataFrame)
 def verbose_audit_disabled(earliest:str = None, latest: str = None):
     from pyspark.sql.functions import (col, current_date, date_sub, to_date, current_timestamp, 
-                                       expr, unix_timestamp, round, from_unixtime, when, to_timestamp)
+                                       expr, unix_timestamp, round, from_unixtime, when, to_timestamp,
+                                       lit, lower)
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 24 hours")
     latest = latest or current_timestamp()
 
     df = spark.table("system.access.audit")
 
+    # workspaceConfKeys / workspaceConfValues are comma-joined in matching positions when one
+    # request changes several settings, so look for the pair anywhere in the list instead of
+    # comparing the whole string (which let "...,enableVerboseAuditLogs" / "...,false" through).
+    verbose_value = expr("""filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs')[0].value""")
+
     df_filtered = df.filter(
-        (col("service_name") == "workspace") &
         (col("action_name").isin("workspaceConfEdit")) &
-        (col("request_params").getItem("workspaceConfKeys") == "enableVerboseAuditLogs") &
-        (col("request_params").getItem("workspaceConfValues") == "false") &
+        (lower(verbose_value) == "false") &
         (col("event_time") >= earliest) & (col("event_time") <= latest)
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
         col("action_name").alias("ACTION"),
         when(col("response.status_code") == 200, "Success").otherwise("Failure").alias("STATUS"),
         col("user_identity.email").alias("SRC_USER"),
-        col("request_params").getItem("workspaceConfKeys").alias("CONF_KEY"),
-        when(col("request_params").getItem("workspaceConfValues") == "false", "Disabled").otherwise("Enabled").alias("CONF_VALUE"),
+        lit("enableVerboseAuditLogs").alias("CONF_KEY"),
+        when(lower(verbose_value) == "false", "Disabled").otherwise("Enabled").alias("CONF_VALUE"),
         col("audit_level").alias("AUDIT_LEVEL"),
         col("source_ip_address").alias("SRC_IP"),
         col("user_agent").alias("USER_AGENT")

@@ -273,7 +273,7 @@
           }
         ],
         "usage_guidance": [
-          "Security-weakening configuration changes: verbose audit logging disabled, IP access list modifications, and Databricks employee access window changes. MITRE T1484. Audit logging disabled ranks CRITICAL because it blinds every other detection. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging."
+          "Security-weakening configuration changes: verbose audit logging disabled, IP access lists turned off or modified, Databricks employee access window changes and maximum token lifetime changes. A single workspaceConfEdit can change several settings at once (comma-joined keys and values in matching positions); every setting in the request is examined, so a security setting bundled with another change is still caught. MITRE T1484, T1562. Audit logging disabled and IP access lists disabled rank CRITICAL: the first blinds every other detection, the second removes the network control for the whole workspace. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, were IP access lists turned off, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging."
         ]
       },
       {
