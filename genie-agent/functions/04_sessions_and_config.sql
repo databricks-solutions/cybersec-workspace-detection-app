@@ -97,7 +97,7 @@ RETURNS TABLE (
   last_seen       TIMESTAMP COMMENT 'Last activity (UTC)',
   events          BIGINT    COMMENT 'Logins with this credential'
 )
-COMMENT 'A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly.'
+COMMENT 'A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs, Databricks service agents and Databricks platform egress (IPs that also carry cluster-internal or in-house OAuth authentication, e.g. a Databricks App relaying the user token) are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly.'
 RETURN
   SELECT
     COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) AS credential_id,
@@ -111,6 +111,16 @@ RETURN
     MAX(a.event_time) AS last_seen,
     COUNT(*) AS events
   FROM system.access.audit AS a
+  LEFT ANTI JOIN (
+    -- Platform egress: IPs that also carry Databricks-internal authentication in the window
+    -- (cluster-internal PATs, in-house OAuth clients behind Apps / serverless). A user's token
+    -- relayed by a Databricks App shows up from these; they are not a second location.
+    SELECT DISTINCT p.source_ip_address AS ip
+    FROM system.access.audit AS p
+    WHERE p.event_time BETWEEN start_time AND end_time
+      AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+           OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+  ) AS platform ON a.source_ip_address = platform.ip
   WHERE a.event_time BETWEEN start_time AND end_time
     AND a.service_name = 'accounts'
     AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
@@ -141,7 +151,7 @@ CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_session_high_count_per_ip
 )
 RETURNS TABLE (
   source_ip        STRING    COMMENT 'Public source IP',
-  distinct_sessions BIGINT   COMMENT 'Distinct credentials from this IP: session ids, plus token ids / OAuth client ids for token logins',
+  distinct_sessions BIGINT   COMMENT 'Distinct credentials signing in from this IP: browser sessions, PATs, OAuth clients',
   distinct_actors  BIGINT    COMMENT 'Distinct identities from this IP -- >1 suggests a shared node or stuffing',
   actors           STRING    COMMENT 'The identities, comma separated',
   user_agents      STRING    COMMENT 'Distinct clients',
@@ -149,11 +159,14 @@ RETURNS TABLE (
   last_seen        TIMESTAMP COMMENT 'Last activity (UTC)',
   events           BIGINT    COMMENT 'Total events from this IP'
 )
-COMMENT 'Public source IPs producing an unusually high number of distinct sessions, with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs and Databricks service agents are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse.'
+COMMENT 'Public source IPs where an unusually high number of distinct credentials signed in (browser sessions, PATs, OAuth clients; short-lived OAuth tokens count as their client), with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs, Databricks service agents and Databricks platform egress IPs are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse.'
 RETURN
   SELECT
     a.source_ip_address AS source_ip,
-    COUNT(DISTINCT COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id'])) AS distinct_sessions,
+    COUNT(DISTINCT COALESCE(a.session_id,
+                      CASE WHEN a.request_params['authenticationMethod'] = 'API_OIDC_TOKEN'
+                           THEN COALESCE(a.request_params['client_id'], CONCAT('oauth:', a.user_identity.email)) END,
+                      a.request_params['tokenId'], a.request_params['client_id'])) AS distinct_sessions,
     COUNT(DISTINCT a.user_identity.email) AS distinct_actors,
     CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,
     CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,
@@ -161,15 +174,36 @@ RETURN
     MAX(a.event_time) AS last_seen,
     COUNT(*) AS events
   FROM system.access.audit AS a
+  LEFT ANTI JOIN (
+    -- Platform egress: IPs that also carry Databricks-internal authentication in the window
+    -- (cluster-internal PATs, in-house OAuth clients behind Apps / serverless). A user's token
+    -- relayed by a Databricks App shows up from these; they are not a second location.
+    SELECT DISTINCT p.source_ip_address AS ip
+    FROM system.access.audit AS p
+    WHERE p.event_time BETWEEN start_time AND end_time
+      AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+           OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+  ) AS platform ON a.source_ip_address = platform.ip
   WHERE a.event_time BETWEEN start_time AND end_time
-    -- Token and OAuth logins carry no session_id; count their token / client id as the credential.
-    AND COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) IS NOT NULL
+    -- Sign-ins only: counting every API call let one person's CLI session read as many credentials.
+    AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
+                          'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')
+    -- A credential is a browser session, a PAT, or an OAuth client. Short-lived OAuth access tokens
+    -- (API_OIDC_TOKEN) get a new tokenId every few minutes, so they count as their client, not
+    -- as one credential each.
+    AND COALESCE(a.session_id,
+                      CASE WHEN a.request_params['authenticationMethod'] = 'API_OIDC_TOKEN'
+                           THEN COALESCE(a.request_params['client_id'], CONCAT('oauth:', a.user_identity.email)) END,
+                      a.request_params['tokenId'], a.request_params['client_id']) IS NOT NULL
     AND NOT a.source_ip_address RLIKE
         '^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[0-1])\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|127\\.|169\\.254\\.|(?i)f[cd][0-9a-f]{2}:)'
     AND NOT COALESCE(a.user_agent, '') RLIKE
         'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming|RawDBHttpClient|wsfs/|mlflow-python|feature-store'
   GROUP BY a.source_ip_address
-  HAVING COUNT(DISTINCT COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id'])) >= min_sessions;
+  HAVING COUNT(DISTINCT COALESCE(a.session_id,
+                      CASE WHEN a.request_params['authenticationMethod'] = 'API_OIDC_TOKEN'
+                           THEN COALESCE(a.request_params['client_id'], CONCAT('oauth:', a.user_identity.email)) END,
+                      a.request_params['tokenId'], a.request_params['client_id'])) >= min_sessions;
 
 -- --------------------------------------------------------------------------
 -- Verbose audit logging disabled.

@@ -852,7 +852,7 @@
           }
         ],
         "usage_guidance": [
-          "A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly."
+          "A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs, Databricks service agents and Databricks platform egress (IPs that also carry cluster-internal or in-house OAuth authentication, e.g. a Databricks App relaying the user token) are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly."
         ]
       },
       {
@@ -929,7 +929,7 @@
           }
         ],
         "usage_guidance": [
-          "Public source IPs producing an unusually high number of distinct sessions, with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs and Databricks service agents are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse."
+          "Public source IPs where an unusually high number of distinct credentials signed in (browser sessions, PATs, OAuth clients; short-lived OAuth tokens count as their client), with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs, Databricks service agents and Databricks platform egress IPs are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse."
         ]
       },
       {
