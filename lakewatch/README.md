@@ -100,7 +100,7 @@ The schema defaults to `databricks_audit_demo` (`--var schema=...` / `--schema`)
 use shell variables, so set them once:
 
 ```sh
-cd lakewatch-demo
+cd lakewatch
 export PROFILE=<your profile> CATALOG=<your catalog> SCHEMA=databricks_audit_demo WH=<warehouse id>
 ```
 
