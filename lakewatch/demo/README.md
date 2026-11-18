@@ -7,7 +7,7 @@ and an AI/BI dashboard on top of it.
 
 The example follows the blog post
 [Detecting credential-driven attacks on Databricks](https://www.databricks.com/blog/detecting-credential-driven-attacks-databricks)
-and reuses the detection queries and the Genie Agent of this repository (`../genie-agent/`).
+and reuses the detection queries and the Genie Agent of this repository (`../../genie-agent/`).
 
 ## The planted attack
 
@@ -71,7 +71,7 @@ All objects live in one schema (default `some_catalog.databricks_audit_demo`):
 | `rules/` | 21 Lakewatch rules: 14 stage rules and 2 correlation rules (`ada_`), 5 rules ported from the Lakewatch `databricks_audit` content pack (`adp_`) |
 | `sql/views.sql` | The `demo_signals` view (rule, stage, actor, source IP, context keys) |
 | `hunts/` | Hunt notebooks h1 to h6 |
-| `genie/` | Genie Agent: `build_space.py` (builds the space from `../genie-agent/`), the space file, the eval set |
+| `genie/` | Genie Agent: `build_space.py` (builds the space from `../../genie-agent/`), the space file, the eval set |
 | `dashboard/` | The AI/BI dashboard: builder and JSON |
 | `resources/`, `resources_py/` | Bundle resources: schema, raw volume, reset job, dashboard, Genie space |
 | `tools/` | `run_hunts.py` (run the hunts and check the planted entity), `genie_eval.py` (Genie eval), `try_corr_fixture.py` and `try_h6_fixture.py` (check the correlation rules and hunt 6 on small fixtures) |
@@ -100,7 +100,7 @@ The schema defaults to `databricks_audit_demo` (`--var schema=...` / `--schema`)
 use shell variables, so set them once:
 
 ```sh
-cd lakewatch
+cd lakewatch/demo
 export PROFILE=<your profile> CATALOG=<your catalog> SCHEMA=databricks_audit_demo WH=<warehouse id>
 ```
 
@@ -229,12 +229,12 @@ rules then join the stages.
 
 ## Genie Agent
 
-The Genie Agent is built from the Genie Agent of this repository (`../genie-agent/`).
+The Genie Agent is built from the Genie Agent of this repository (`../../genie-agent/`).
 `genie/build_space.py` calls its build (`genie-agent/deploy/install.py`), points it at the demo
 table, drops the two detections that read `system.query.history`, and adds the `principals` table,
 the `demo_signals` view, two example queries (identity and shared-IP timeline, "what did the
 attacker do after reading secrets?") and a paragraph about the demo. Rebuild after a change to
-`../genie-agent/` or to `build_space.py`:
+`../../genie-agent/` or to `build_space.py`:
 
 ```sh
 uv run --frozen python genie/build_space.py

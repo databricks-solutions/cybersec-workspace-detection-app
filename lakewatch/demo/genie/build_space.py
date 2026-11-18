@@ -1,6 +1,6 @@
 """Write databricks_audit.geniespace.json (the Genie Agent of the demo) from the detection app's Genie Agent.
 
-The app's own build (../genie-agent/deploy/install.py at the repository root: build_serialized_space) puts every detection
+The app's own build (../../genie-agent/deploy/install.py at the repository root: build_serialized_space) puts every detection
 function into the space as an example query. This script changes its output for the demo:
 
 - system.access.audit becomes the placeholder table audit_demo_catalog.audit_demo.audit (the bundle's
@@ -22,7 +22,7 @@ sys.dont_write_bytecode = True   # keep the app's genie-agent/ free of __pycache
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "databricks_audit.geniespace.json"
-INSTALL = HERE.parents[1] / "genie-agent" / "deploy" / "install.py"   # the app at the repository root
+INSTALL = HERE.parents[2] / "genie-agent" / "deploy" / "install.py"   # the app at the repository root
 
 SOURCE = "audit_demo_catalog.audit_demo"       # data source identifiers are not quoted
 S = "`audit_demo_catalog`.`audit_demo`"        # quoted in SQL, so that a catalog such as my-catalog works
