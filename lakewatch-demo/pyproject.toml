@@ -1,0 +1,29 @@
+[project]
+name = "databricks-audit-demo"
+version = "0.1.0"
+description = "Lakewatch v2 demo: a synthetic copy of system.access.audit with planted attacks, rules and hunts"
+requires-python = ">=3.11"
+dependencies = ["databricks-sdk>=0.162", "pyyaml", "pyarrow"]
+
+[project.optional-dependencies]
+dev = ["pytest", "databricks-bundles==1.24.0", "pydabs-genie-agent-retarget==0.2.0"]
+
+[project.scripts]
+auditdemo = "auditdemo.cli:run"
+auditdemo-reset = "auditdemo.jobs:reset_main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auditdemo"]
+
+# Files the CLI reads at run time.
+[tool.hatch.build.targets.wheel.force-include]
+"rules" = "auditdemo/_data/rules"
+"sql" = "auditdemo/_data/sql"
+"profile/profile.json" = "auditdemo/_data/profile.json"

@@ -1,0 +1,70 @@
+# Ported from the Lakewatch content pack rule databricks_audit/user_admin_account_change (v1) to the flat v2 rule format of this demo.
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: adp_user_admin_account_change
+description: Detects when users modify admin-level privileges or admin group memberships, which could indicate privilege
+  escalation attempts or unauthorized administrative access modifications
+severity: Medium
+category: Static Signature
+fidelity: FIDELITY_INVESTIGATIVE
+objective: Identify potentially suspicious changes to administrative privileges including direct admin role assignments,
+  account ownership changes, and modifications to admin group memberships. These activities could indicate attempts
+  to establish persistence through elevated privileges or unauthorized administrative access.
+mitre:
+- taxonomy: Enterprise
+  tactic: Persistence
+  technique_id: T1098
+  technique: Account Manipulation
+  sub_technique_id: T1098.003
+  sub_technique: Additional Cloud Roles
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule:
+  at_least_every: 1h
+  enabled: false
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      FROM {{audit_table}}
+      |> WHERE
+        IN_TIMERANGE(event_time)
+        AND (
+          action_name IN ('setAccountAdmin', 'changeAccountOwner', 'setAdmin', 'removeAdmin')
+          OR (action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup', 'removePrincipalFromGroup') AND request_params.targetGroupName RLIKE '(?i)(admin|administrator|owner|root|superuser)')
+        )
+      |> SELECT *
+      |> SELECT event_time,
+           user_identity.email AS actor,
+           CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR identity_metadata.acting_resource_type ILIKE '%service principal%' THEN 'sp' ELSE 'user' END AS actor_kind,
+           source_ip_address AS src_ip,
+           session_id,
+           service_name,
+           action_name,
+           workspace_id,
+           user_agent,
+           response.status_code AS status_code,
+           to_json(request_params) AS params,
+           user_identity.email AS user_identity_email
+output:
+  summary: 'Admin account change: {action_name} by {user_identity_email}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '5'
+    session_id: '{session_id}'
+    service_name: '{service_name}'
+    action_name: '{action_name}'
+    workspace_id: '{workspace_id}'
+    user_agent: '{user_agent}'
+    status_code: '{status_code}'
+    params: '{params}'
+    user_identity_email: '{user_identity_email}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+annotations:
+  content_pack: databricks_audit
+  pack_rule: user_admin_account_change

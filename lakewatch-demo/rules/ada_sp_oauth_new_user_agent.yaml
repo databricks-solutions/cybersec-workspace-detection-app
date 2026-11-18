@@ -1,0 +1,92 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_sp_oauth_new_user_agent
+description: A service principal gets an OAuth token with a new user agent, then acts from a new IP within one minute.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 1 (access). A stolen service principal secret is used with the attacker's own tools. Service
+  principals are very regular: the same client, the same IPs. The rule takes each successful
+  accounts.oidcTokenAuthorization of a service principal in the run window whose user agent the
+  service principal did not use for an OAuth token in the 14 days before. Then, within 60 seconds
+  after the token (a sliding window, not a minute bucket), the service principal must call another
+  action from a source IP that it did not use at all in the 14 days before the token. Both
+  conditions together keep client upgrades (new user agent, known IP) and new egress IPs (known
+  client) out. False positives: a job moved to new compute together with a new SDK version.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+  - https://attack.mitre.org/techniques/T1550/001/
+mitre:
+  - {taxonomy: Enterprise, tactic: Initial Access, technique_id: T1078, technique: Valid Accounts,
+     sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1550,
+     technique: Use Alternate Authentication Material, sub_technique_id: T1550.001,
+     sub_technique: Application Access Token}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      WITH sp_rows AS (
+        FROM {{audit_table}}
+        |> WHERE event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, user_agent, service_name, action_name,
+                  request_params.tokenId AS token_id, response.status_code AS status
+        |> WHERE actor_kind = 'sp' AND actor <> ''
+        -- a NULL IP never matches the baseline, so it would always look new
+        |> WHERE src_ip IS NOT NULL AND src_ip <> ''
+      ),
+      oauth AS (
+        FROM sp_rows
+        |> WHERE service_name = 'accounts' AND action_name = 'oidcTokenAuthorization' AND status = 200
+      ),
+      new_ua AS (
+        FROM oauth AS o
+        |> WHERE IN_TIMERANGE(o.event_time)
+        |> LEFT ANTI JOIN oauth AS b
+             ON b.actor = o.actor AND b.user_agent <=> o.user_agent AND b.event_time < o.event_time
+      ),
+      followed AS (
+        FROM new_ua AS o
+        |> JOIN sp_rows AS f
+             ON f.actor = o.actor AND f.event_time > o.event_time
+            AND f.event_time <= o.event_time + INTERVAL 60 SECONDS
+            AND NOT (f.service_name = 'accounts' AND f.action_name IN ('oidcTokenAuthorization', 'tokenLogin'))
+        |> SELECT o.event_time AS token_time, o.actor, o.actor_kind, o.user_agent, o.token_id,
+                  f.event_time AS act_time, f.src_ip, f.service_name, f.action_name
+      )
+      FROM followed AS f
+      |> LEFT ANTI JOIN sp_rows AS b
+           ON b.actor = f.actor AND b.src_ip = f.src_ip AND b.event_time < f.token_time
+      |> AGGREGATE max(f.act_time) AS event_time, min(f.token_time) AS token_time,
+                   collect_set(concat(f.service_name, '.', f.action_name)) AS actions
+         GROUP BY f.actor AS actor, f.actor_kind AS actor_kind, f.src_ip AS src_ip,
+                  f.token_id AS token_id, f.user_agent AS user_agent
+      |> SELECT event_time, actor, actor_kind, src_ip, token_id, user_agent, token_time,
+                array_join(actions, ', ') AS actions
+output:
+  summary: 'Service principal {actor} used a new OAuth client from a new IP {src_ip}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '1'
+    token_id: '{token_id}'
+    user_agent: '{user_agent}'
+    actions: '{actions}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Ask the owner of the service principal if a new client or a new host was planned.
+  2. List what the service principal did from src_ip after token_time.
+  3. If not planned, rotate the OAuth secrets of the service principal and look for where the
+     secret was stored (secret scopes, CI variables).

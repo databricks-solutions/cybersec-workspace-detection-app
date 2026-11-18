@@ -1,0 +1,2283 @@
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {
+        "id": "a0000000000000000000000000000001",
+        "question": [
+          "Were we compromised in the last 90 days?"
+        ]
+      },
+      {
+        "id": "a0000000000000000000000000000002",
+        "question": [
+          "What did the attacker do after reading secrets?"
+        ]
+      },
+      {
+        "id": "a0000000000000000000000000000003",
+        "question": [
+          "Show the timeline for maria.lopez and every identity that shared her IPs"
+        ]
+      },
+      {
+        "id": "a0000000000000000000000000000004",
+        "question": [
+          "Who was added to the admins group?"
+        ]
+      },
+      {
+        "id": "a0000000000000000000000000000005",
+        "question": [
+          "Is the nightly secret listing by sp-ci-deploy suspicious?"
+        ]
+      }
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {
+        "identifier": "audit_demo_catalog.audit_demo.audit",
+        "column_configs": [
+          {
+            "column_name": "account_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "action_name",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "audit_level",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "event_date",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "event_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "event_time",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "identity_metadata"
+          },
+          {
+            "column_name": "request_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "request_params"
+          },
+          {
+            "column_name": "response"
+          },
+          {
+            "column_name": "service_name",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "session_id",
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "source_ip_address",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "user_agent",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "user_identity"
+          },
+          {
+            "column_name": "version",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "workspace_id",
+            "enable_format_assistance": true
+          }
+        ]
+      },
+      {
+        "identifier": "audit_demo_catalog.audit_demo.demo_signals",
+        "column_configs": [
+          {
+            "column_name": "actor",
+            "description": [
+              "Identity of the signal: the same value as audit.user_identity.email (a UUID for a service principal)."
+            ]
+          },
+          {
+            "column_name": "actor_name",
+            "synonyms": [
+              "identity name",
+              "display name"
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "rule",
+            "enable_entity_matching": true,
+            "synonyms": [
+              "detection",
+              "rule name"
+            ]
+          },
+          {
+            "column_name": "src_ip",
+            "synonyms": [
+              "source IP",
+              "attacker IP"
+            ]
+          },
+          {
+            "column_name": "stage",
+            "enable_format_assistance": true,
+            "description": [
+              "1 access, 2 discovery, 3 secret harvest, 4 execution, 5 persistence, 6 collection and clean-up, corr = correlation."
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "audit_demo_catalog.audit_demo.principals",
+        "column_configs": [
+          {
+            "column_name": "display_name",
+            "enable_entity_matching": true,
+            "synonyms": [
+              "name",
+              "identity"
+            ]
+          },
+          {
+            "column_name": "email",
+            "description": [
+              "The value of audit.user_identity.email: an email for a user, the application id (UUID) for a service principal."
+            ]
+          },
+          {
+            "column_name": "kind",
+            "enable_format_assistance": true,
+            "description": [
+              "user or sp (service principal)."
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "instructions": {
+    "text_instructions": [
+      {
+        "id": "c0000000000000000000000000000001",
+        "content": [
+          "You are a security investigation assistant over Databricks audit logs\n",
+          "(audit_demo_catalog.audit_demo.audit).\n",
+          "\n",
+          "You work in **two modes** \u2014 read the request and pick one, then say which you chose\n",
+          "and the time window you are using (with no window given, use the last 30 days;\n",
+          "during an active incident, widen rather than narrow). Do not ask the analyst to\n",
+          "pick a window, a threshold, or \"fixed vs rolling\" when a sensible default exists \u2014\n",
+          "state your assumption and proceed.\n",
+          "\n",
+          "- **Answer mode** \u2014 one specific question (\"who created personal access tokens last\n",
+          "  week?\"). Match it to a trusted example query, run it, report with evidence. This\n",
+          "  is most requests.\n",
+          "- **Investigation mode** \u2014 an open-ended *goal*: \"investigate whether we were\n",
+          "  compromised\", \"is this account a bad actor \u2014 what did they do?\", \"triage the last\n",
+          "  24 hours\", \"this IP looks suspicious.\" Run the investigation loop below.\n",
+          "\n",
+          "## Investigation loop\n",
+          "\n",
+          "**You answer one query per turn**, so an investigation plays out across turns.\n",
+          "Make each turn advance it, and **always end by naming the next query to run** so the\n",
+          "thread continues on its own. A follow-up within an investigation (\"proceed\",\n",
+          "\"continue\", \"go on\") **stays in investigation mode** \u2014 keep advancing the loop and\n",
+          "drive toward the verdict; do not reset to answer mode and do not just re-list rows.\n",
+          "\n",
+          "**Every query must return a compact result** \u2014 an aggregate, a ranking, or a\n",
+          "tightly filtered set (one actor's *sensitive* events, never all their activity). A\n",
+          "query that returns thousands of raw rows is truncated to a small sample before you\n",
+          "see it, and that sample is dominated by routine high-volume events \u2014 logins, reads,\n",
+          "query execution \u2014 so a raw dump misleads you into \"nothing here\" while the real\n",
+          "signal sits in rows you never saw. This is the single most common way an\n",
+          "investigation goes wrong: never `UNION` raw events across families, and never dump\n",
+          "one actor's entire history.\n",
+          "\n",
+          "1. **Establish visibility.** First turn of any investigation: check whether verbose\n",
+          "   audit logging was ever disabled in the window with the dedicated\n",
+          "   `detect_verbose_audit_logging_disabled` asset \u2014 it returns both disables *and*\n",
+          "   re-enables, so the gap can be bounded at both ends. (The broader\n",
+          "   `detect_config_changes_high_priority` also surfaces the disable, but alongside\n",
+          "   IP-ACL and employee-access changes, and it labels a re-enable as a generic\n",
+          "   config change \u2014 so it does not cleanly bound the far end of the gap.) If logging\n",
+          "   was disabled, every conclusion after that timestamp is bounded by a logging gap \u2014\n",
+          "   say so. Note how far back the data goes.\n",
+          "2. **Triage with the trusted `detect_investigation_triage` query \u2014 never a raw\n",
+          "   sweep.** It is built for exactly this: it ranks actors (and their source IPs)\n",
+          "   by how many **distinct security-sensitive action types** they touched (breadth\n",
+          "   across families), then failed attempts, then volume \u2014 restricted to the\n",
+          "   security-relevant actions and excluding routine logins, so a busy service\n",
+          "   principal does not float to the top on raw volume. The incident's signature is\n",
+          "   one identity touching several *rare, high-severity* action types (an IP-ACL\n",
+          "   burst is low-volume but high-signal), so the lead surfaces at the top of a small\n",
+          "   result. Name that actor/IP as the lead. Do not hand-roll a cross-family sweep or\n",
+          "   a volume ranking \u2014 this asset exists so you don't have to. **But triage is a\n",
+          "   per-actor breadth lens, not a universal attack-finder:** a campaign spread across\n",
+          "   many identities that each do a little \u2014 credential stuffing, mass token replay,\n",
+          "   distributed export \u2014 will not top this ranking, because no single identity has\n",
+          "   the breadth. When the goal points at that shape (many accounts, one repeated\n",
+          "   signal), also rank by **IP and token concentration** \u2014 which IPs or tokens touch\n",
+          "   the most identities and events \u2014 not just per-actor breadth, and treat the shared\n",
+          "   IP/token as the lead instead of any one actor.\n",
+          "3. **Pivot on the lead \u2014 scope to sensitive activity, never a raw dump (next\n",
+          "   turns).** Pulling *all* of the lead's events truncates to a routine-login sample\n",
+          "   and hides the incident. Instead run the specific **trusted detection queries**\n",
+          "   for the action types the triage flagged (e.g. the IP access list changes query,\n",
+          "   the config-change query, admin grants, token lifecycle), filtered to this\n",
+          "   actor/IP, and read the actual rows: the sequence of changes, the `user_agent` on\n",
+          "   each, and whether failed attempts (`IpAccessDenied` /\n",
+          "   `accountIpAclsValidationFailed`) preceded them.\n",
+          "   - Lead *IP*: the sensitive actions and identities from it \u2014 not every request.\n",
+          "   - Lead *session*: whether it was used from more than one IP or device.\n",
+          "4. **Build the timeline.** Order the correlated events attempt \u2192 change \u2192 effect\n",
+          "   (e.g. denials from an IP stop right after that actor widens the allow list).\n",
+          "   `user_agent` separates console clicks from Terraform/CLI/SDK automation \u2014 and a\n",
+          "   recognised migration or automation client is itself the likely benign\n",
+          "   explanation, not evidence of an attack.\n",
+          "5. **Deliver the verdict \u2014 do not end by only listing events.** Synthesize: the\n",
+          "   timeline of what happened, what the `user_agent` says about the activity (a\n",
+          "   recognised migration, CLI, SDK or automation client points to benign\n",
+          "   operations; an interactive client doing the same is read differently), an\n",
+          "   explicit **confidence level**, and the plausible benign explanation. Say plainly\n",
+          "   what the audit log cannot settle and which data source would (e.g. resolving an\n",
+          "   IP access list id to its current CIDRs via `GET /api/2.0/ip-access-lists`). Never\n",
+          "   call something malicious, and never call absence \"safe.\"\n",
+          "\n",
+          "## Discipline that holds in both modes\n",
+          "\n",
+          "**Prefer a trusted example query \u2014 and never guess a `request_params` key.** Every\n",
+          "detection ships as a verified, parameterized example query, and each names the\n",
+          "questions it answers. Match the question to an example query and run it \u2014 adjust\n",
+          "only its `:start_time` / `:end_time` window (and any documented threshold\n",
+          "parameter). Only write ad-hoc SQL when none fits \u2014 and say so. When you do go\n",
+          "ad-hoc, do **not** guess a `request_params` key: a wrong key returns 0 rows rather\n",
+          "than an error, so a mistyped key reads as \"no matching events\" when the events are\n",
+          "sitting right there (this is how an investigation reports a false \"no evidence\").\n",
+          "The trusted queries already carry the verified keys \u2014 reach for the relevant one\n",
+          "(e.g. `detect_token_scanning_activity` for token work, `detect_secrets_discovery`\n",
+          "for secret reads) before hand-rolling; if you must go ad-hoc, confirm the key\n",
+          "exists with `map_keys(request_params)` before concluding absence.\n",
+          "\n",
+          "**Filter on `service_name`, not `audit_level`.** Verified live: every IP access\n",
+          "list mutation is `service_name='accounts'` with `audit_level='WORKSPACE_LEVEL'`,\n",
+          "even though IP ACLs also exist at account scope. Filtering\n",
+          "`audit_level='ACCOUNT_LEVEL'` returns **zero rows** \u2014 which reads as \"no changes\n",
+          "were made.\" Treat `audit_level` as a reporting column. `setSetting` is the one\n",
+          "genuine exception and is account-scoped.\n",
+          "\n",
+          "**Never report absence as safety.** If a query returns nothing, say \"no matching\n",
+          "events were found in audit_demo_catalog.audit_demo.audit for &lt;window&gt;\" \u2014 not \"this did not\n",
+          "happen.\" An event can be missing because verbose audit logging was off, because\n",
+          "the window missed it, or because the action is named differently here.\n",
+          "\n",
+          "**IP access lists carry no IP values.** Verified across all IP-ACL mutations in a\n",
+          "live 90-day window: `request_params` holds exactly `ipAccessListId` and `userId`,\n",
+          "and `response.result` is NULL. There is no before/after payload. So when asked\n",
+          "for the allow list \"diff\" or \"what IPs were added\": give the changelog, state\n",
+          "plainly that the CIDR values are **not in the audit log**, point at\n",
+          "`GET /api/2.0/ip-access-lists` to resolve `ip_access_list_id` to current\n",
+          "contents, and say historical values are unrecoverable. Never attempt\n",
+          "`LAG(request_params['ipAddresses'])` \u2014 that key does not exist, so it returns\n",
+          "NULL for every row, which reads as \"the list was empty.\"\n",
+          "\n",
+          "Some events *do* carry values: `setSetting` has `settingValueForAudit` (note\n",
+          "`settingName` is often empty while `settingTypeName` holds the meaningful\n",
+          "identifier), and `workspaceConfEdit` has `workspaceConfValues`.\n",
+          "\n",
+          "**Distinguish success from attempt.** `response.status_code` and the dedicated\n",
+          "failure actions (`accountIpAclsValidationFailed`, `IpAccessDenied`) separate what\n",
+          "an actor achieved from what they tried. A burst of failures from one identity is\n",
+          "often the more interesting signal. Never silently drop failures.\n",
+          "\n",
+          "**Answer with evidence.** Surface `event_time` (UTC, labelled), the actor,\n",
+          "`source_ip_address`, `user_agent`, and status.\n",
+          "\n",
+          "**Aggregate the high-volume detections.** Downloads and secret reads run to\n",
+          "hundreds of thousands of events. Report per-actor volume and outliers, not\n",
+          "per-event rows.\n",
+          "\n",
+          "**Stay inside the data.** Do not speculate about attacker intent or attribution.\n",
+          "Report what the audit trail contains, name the limits plainly, and suggest the\n",
+          "next query. If the audit log cannot answer something, say which data source would.\n",
+          "\n",
+          "**Severity is a triage hint, not a verdict.** It ranks attention; it is not a\n",
+          "determination that something is malicious. Every detection has documented false\n",
+          "positives \u2014 admins legitimately reconfigure workspaces, and security teams\n",
+          "legitimately run credential scanners. Where a benign explanation is likely, say\n",
+          "so alongside the finding.\n",
+          "\n",
+          "## This demo\n",
+          "\n",
+          "- The data is a synthetic copy of the Databricks audit log system table for the fake company\n",
+          "  corp.example. The audit table is audit_demo_catalog.audit_demo.audit. It has the same columns as the system table.\n",
+          "- A service principal shows in `user_identity.email` as its application id (a UUID), not as a name.\n",
+          "  To show its name, join audit_demo_catalog.audit_demo.principals on `principals.email = audit.user_identity.email` and use\n",
+          "  `principals.display_name` (for example sp-etl-prod). `identity_metadata.run_as_display_name` also has\n",
+          "  the name on most rows. Always show the name together with the id.\n",
+          "- When the user names an identity (for example sp-etl-prod or maria.lopez), find it in `principals`\n",
+          "  first: match `display_name`, `email`, or the part of `email` before '@'. Then filter the audit table\n",
+          "  on that `email`.\n",
+          "- audit_demo_catalog.audit_demo.demo_signals has the Lakewatch detection signals of this demo, one row per signal:\n",
+          "  `rule`, `stage`, `actor` (the same value as `user_identity.email`), `actor_name`, `src_ip`,\n",
+          "  `event_time`. Stages: 1 access, 2 discovery, 3 secret harvest, 4 execution, 5 persistence,\n",
+          "  6 collection and clean-up, corr = correlation of several stages.\n",
+          "- Rules that start with `ada_` find attack stages and chains. Rules that start with `adp_` are\n",
+          "  single-event rules from the detection pack. They also fire on normal work, so one `adp_` signal\n",
+          "  alone is not an incident.\n",
+          "- For \"were we compromised?\" and other open questions: start with `demo_signals`. Rank the actors by\n",
+          "  the number of distinct stages of their `ada_` signals, and read the correlation rules\n",
+          "  `ada_identity_pivot_chain` and `ada_multi_stage_identity`. Name every identity in a chain (for\n",
+          "  example a user and the service principal that worked from the same IP address), not only the first.\n",
+          "  Then confirm the chain in the audit table with the trusted queries.\n",
+          "- For a question about one identity, also read its rows in `demo_signals`. Its `ada_` signals show\n",
+          "  the time and the IP address to look at first. Do not call the identity's activity normal before\n",
+          "  you have checked them.\n",
+          "- A sign-in with an OAuth token shows as `accounts.oidcTokenAuthorization`\n",
+          "  (`request_params.authenticationMethod` = API_OIDC_TOKEN), and a sign-in with a personal access\n",
+          "  token as `accounts.tokenLogin`. For \"after it got an OAuth token\", start from\n",
+          "  `oidcTokenAuthorization` and look for a new IP address or user agent.\n",
+          "- Before you call an action suspicious, compare it with the history of the same identity in the\n",
+          "  last 14 days: the same action, the same hour, the same IP range and the same user agent. Work that\n",
+          "  repeats on a schedule, or that an admin does from their usual IP address and browser, is a likely\n",
+          "  normal explanation. Say so.\n",
+          "- Always name the objects of an action from `request_params`: the group (`targetGroupName`) and the\n",
+          "  added principal (`targetUserName`) of a group change, the scope and key of a secret, the path of an\n",
+          "  export (`notebookFullPath`), the function name of a function change.\n",
+          "- Time: use `current_timestamp()` as now. A demo reset loads data that ends at the reset time. If the\n",
+          "  newest `event_time` in the audit table is more than one day before `current_timestamp()`, use that\n",
+          "  newest `event_time` as now. In this demo, time words are rolling windows that end at now: \"today\"\n",
+          "  and \"yesterday\" = the last 24 hours, \"last week\" = the last 7 days, \"last 90 days\" = 90 days."
+        ]
+      }
+    ],
+    "example_question_sqls": [
+      {
+        "id": "01b4c15b76034379b182552f55f34810",
+        "question": [
+          "detect_config_changes_high_priority"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      CASE\n",
+          "        WHEN a.action_name = 'workspaceConfEdit' THEN CONCAT(\n",
+          "          a.request_params['workspaceConfKeys'], ': ',\n",
+          "          COALESCE(a.request_params['workspaceConfValues'], 'N/A'))\n",
+          "        WHEN a.action_name IN ('createIpAccessList', 'updateIpAccessList', 'deleteIpAccessList')\n",
+          "          THEN CONCAT('IP Access List ', a.action_name, ' (id ',\n",
+          "                      COALESCE(a.request_params['ipAccessListId'], 'unknown'), ')')\n",
+          "        ELSE 'Unknown Configuration'\n",
+          "      END,\n",
+          "      CASE\n",
+          "        WHEN a.action_name = 'workspaceConfEdit'\n",
+          "         AND a.request_params['workspaceConfKeys'] = 'enableVerboseAuditLogs'\n",
+          "         AND lower(a.request_params['workspaceConfValues']) = 'false'\n",
+          "          THEN 'CRITICAL - Audit Logging Disabled'\n",
+          "        WHEN a.action_name = 'deleteIpAccessList' THEN 'HIGH - IP Access List Deleted'\n",
+          "        WHEN a.action_name IN ('createIpAccessList', 'updateIpAccessList')\n",
+          "          THEN 'MEDIUM - IP Access List Modified'\n",
+          "        WHEN a.action_name = 'workspaceConfEdit'\n",
+          "         AND a.request_params['workspaceConfKeys'] = 'customerApprovedWSLoginExpirationTime'\n",
+          "          THEN 'MEDIUM - Change to Databricks Employee Access Config'\n",
+          "        ELSE 'MEDIUM - Configuration Change'\n",
+          "      END,\n",
+          "      a.audit_level,\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (\n",
+          "        (a.service_name = 'workspace'\n",
+          "          AND a.action_name = 'workspaceConfEdit'\n",
+          "          AND a.request_params['workspaceConfKeys'] = 'enableVerboseAuditLogs')\n",
+          "        OR a.action_name IN ('createIpAccessList', 'updateIpAccessList', 'deleteIpAccessList')\n",
+          "        OR (a.action_name = 'workspaceConfEdit'\n",
+          "          AND a.request_params['workspaceConfKeys'] = 'customerApprovedWSLoginExpirationTime')\n",
+          "      )\n",
+          ") AS results(event_time, action, status, actor, config_change, severity, audit_level, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Security-weakening configuration changes: verbose audit logging disabled, IP access list modifications, and Databricks employee access window changes. MITRE T1484. Audit logging disabled ranks CRITICAL because it blinds every other detection. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging."
+        ]
+      },
+      {
+        "id": "0e6cb2199def487ab8a53afd3659ddde",
+        "question": [
+          "detect_access_token_deleted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['tokenHash'],\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name = 'revokeDbToken'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, status, actor, token_hash, source_ip, user_agent, audit_level)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Personal access tokens revoked (revokeDbToken). Usually routine hygiene, but mass revocation can be destructive action, and revoking a token right after use can be cleanup. Use for: revoked tokens, deleted PATs, token revocation, who removed an access token, revokeDbToken."
+        ]
+      },
+      {
+        "id": "0edac9baf89a43a6b8eb3e0a7776dd3c",
+        "question": [
+          "detect_credential_scanner_activity"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      MAX(a.event_time)  AS event_time,\n",
+          "      a.user_identity.email AS actor,\n",
+          "      a.user_agent,\n",
+          "      a.source_ip_address AS source_ip,\n",
+          "      MAX(a.service_name) AS service_name,\n",
+          "      MAX(a.action_name)  AS action,\n",
+          "      COUNT(*)            AS events\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (lower(a.user_agent) LIKE '%trufflehog%'\n",
+          "        OR lower(a.user_agent) LIKE '%gitleaks%'\n",
+          "        OR lower(a.user_agent) LIKE '%secretscan%')\n",
+          "    GROUP BY a.user_identity.email, a.user_agent, a.source_ip_address\n",
+          ") AS results(event_time, actor, user_agent, source_ip, service_name, action, events)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Credential-scanning tools identified by user agent (TruffleHog and similar). MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Dual-use: your own security team may run these legitimately, so confirm whether the actor and timing were sanctioned before treating it as an incident. Use for: TruffleHog, credential scanning tools, secret scanners, who ran a credential scanner, scanning activity, security tool usage."
+        ]
+      },
+      {
+        "id": "1d5587390e0e41ceaa0ca72a3e61d3ce",
+        "question": [
+          "detect_user_password_changed"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['targetUserId'],\n",
+          "      a.request_params['newPasswordSource'],\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name = 'changePassword'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, status, actor, target_user, password_source, source_ip, user_agent, audit_level)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Passwords changed (changePassword). MITRE T1098. An admin changing ANOTHER user account password is account takeover; compare actor to target_user. Use for: password changes, who reset a password, changePassword, credential changes, password resets."
+        ]
+      },
+      {
+        "id": "25eb28b26c194d0f9eecd7f01c1d59ac",
+        "question": [
+          "detect_databricks_employee_logon"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['authentication_method'],\n",
+          "      CAST(a.workspace_id AS STRING),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('login', 'certLogin', 'jwtLogin', 'mfaLogin',\n",
+          "                            'passwordVerifyAuthentication', 'samlLogin')\n",
+          "      AND a.request_params['authentication_method'] = 'GENIE_AUTH'\n",
+          "      AND a.response.status_code = 200\n",
+          "      AND a.audit_level = 'WORKSPACE_LEVEL'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, action, actor, auth_method, workspace_id, source_ip, user_agent)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Databricks employee (support) logons into your workspace via GENIE_AUTH. Expected during an open support engagement and gated by the customer-approved access window; unexplained occurrences should be reconciled against your support tickets. Use for: Databricks employee access, support logins, did Databricks staff access our workspace, GENIE_AUTH, vendor access, third-party access to our workspace."
+        ]
+      },
+      {
+        "id": "2cfda9a966f3499ea3dade6cdd403a40",
+        "question": [
+          "detect_user_role_modified"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      COALESCE(a.request_params['targetUserName'], a.request_params['target_user_name']),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (a.request_params['endpoint'] IN ('roleAssignment', 'permissionAssignment')\n",
+          "           OR a.action_name IN ('updateRoleAssignment', 'setRoleAssignment'))\n",
+          ") AS results(event_time, action, status, actor, target, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Role assignments changed for a principal (roleAssignment / updateRoleAssignment endpoints). MITRE T1098, TA0004 Privilege Escalation. Use for: role changes, who changed a role, role assignment, permission role modified, entitlement grants."
+        ]
+      },
+      {
+        "id": "35c0ad8a8eda4cb49d7987bb87c8edb9",
+        "question": [
+          "detect_admin_sql_activity_spike"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      to_date(a.event_time) AS event_date,\n",
+          "      a.user_identity.email AS actor,\n",
+          "      COUNT(*) AS commands,\n",
+          "      COUNT(DISTINCT a.request_params['commandText']) AS distinct_cmds,\n",
+          "      MAX(a.request_params['commandText']) AS sample_command\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND a.request_params['commandText'] IS NOT NULL\n",
+          "      AND upper(a.request_params['commandText']) NOT LIKE '%THIS IS A SYSTEM GENERATED QUERY%'\n",
+          "      AND (upper(a.request_params['commandText']) LIKE '%CREATE USER%'\n",
+          "        OR upper(a.request_params['commandText']) LIKE '%ALTER USER%'\n",
+          "        OR upper(a.request_params['commandText']) LIKE '%ALTER ACCOUNT%'\n",
+          "        OR upper(a.request_params['commandText']) LIKE '%DROP USER%'\n",
+          "        OR upper(a.request_params['commandText']) LIKE '%GRANT ADMIN%')\n",
+          "    GROUP BY to_date(a.event_time), a.user_identity.email\n",
+          "    HAVING COUNT(*) >= 5\n",
+          ") AS results(event_date, actor, commands, distinct_cmds, sample_command)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Administrative SQL DDL (CREATE USER, ALTER USER, ALTER ACCOUNT and similar) aggregated per actor per day, above a threshold, excluding Databricks system-generated queries. MITRE T1098 Account Manipulation. A person who does not normally issue account DDL suddenly issuing a lot of it is the signal. Note this reports a COUNT above a threshold rather than the source notebook normalised rate, because a stateless function has no baseline window to normalise against. Use for: admin activity spike, unusual admin commands, who ran CREATE USER, account DDL, spike in administrative activity, admin SQL."
+        ]
+      },
+      {
+        "id": "479e6ee49cbb46e58c79448a6d3a9b29",
+        "question": [
+          "detect_user_account_created"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['targetUserName'],\n",
+          "      a.request_params['endpoint'],\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name = 'add'\n",
+          "      AND CAST(a.response.status_code AS INT) = 200\n",
+          "      AND a.request_params['endpoint'] = 'adminConsole'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, actor, target_user, endpoint, source_ip, user_agent, audit_level)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user."
+        ]
+      },
+      {
+        "id": "4811a71888554690add25a4011781f2e",
+        "question": [
+          "detect_data_movement_explicit_creds"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.service_name,\n",
+          "      a.action_name,\n",
+          "      a.user_identity.email,\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.action_name IN ('mount', 'createStorageCredential', 'updateStorageCredential',\n",
+          "                            'createConnection', 'updateConnection')\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, service_name, action, actor, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Creation or modification of external storage mounts, storage credentials, and external connections (mount, createStorageCredential, updateStorageCredential, createConnection, updateConnection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external connections created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
+        ]
+      },
+      {
+        "id": "5538a03a2188445c95cf587467aaddbf",
+        "question": [
+          "detect_account_admin_granted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.action_name IN ('setAccountAdmin','changeAccountOwner')\n",
+          "           THEN 'DIRECT' ELSE 'VIA_GROUP' END,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      COALESCE(a.request_params['targetUserName'],\n",
+          "               a.request_params['target_user_name'],\n",
+          "               a.request_params['principals']),\n",
+          "      COALESCE(a.request_params['targetGroupName'], a.request_params['target_group_name']),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (\n",
+          "        a.action_name IN ('setAccountAdmin', 'changeAccountOwner')\n",
+          "        OR (\n",
+          "          a.action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup')\n",
+          "          AND '' IS NOT NULL AND trim('') <> ''\n",
+          "          -- array_contains over a split, NOT `IN (SELECT explode(...))`. The\n",
+          "          -- subquery form creates fine on a SQL warehouse but FAILS inside a UDF\n",
+          "          -- body on DBR (notebook/spark.sql), so the notebook installer could not\n",
+          "          -- create these three functions while the CLI installer could. Verified\n",
+          "          -- live 2026-08-27. Keep this form -- it works on both.\n",
+          "          AND array_contains(\n",
+          "                transform(split('', ','), x -> trim(x)),\n",
+          "                COALESCE(a.request_params['targetGroupName'],\n",
+          "                         a.request_params['target_group_name']))\n",
+          "        )\n",
+          "      )\n",
+          ") AS results(event_time, grant_path, action, status, actor, target, target_group, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Account administrator privilege granted, both directly (setAccountAdmin, changeAccountOwner) and indirectly by adding a principal to an admin group named in admin_groups. MITRE T1098 Account Manipulation, TA0004 Privilege Escalation. Account admin is the highest privilege in a Databricks account. Use for: who was made account admin, account admin grants, privilege escalation, new administrators, setAccountAdmin, changeAccountOwner, who granted admin rights, admin group membership changes."
+        ]
+      },
+      {
+        "id": "57e01fa5a6ab4aa6a4f05a6ad6e29a37",
+        "question": [
+          "detect_user_account_changed"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      COALESCE(a.request_params['targetUserName'], a.request_params['targetUserId']),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name = 'updateUser'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, status, actor, target_user, source_ip, user_agent, audit_level, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "User account attributes modified (updateUser) -- entitlements, active status, display name, roles. MITRE T1098 Account Manipulation. Re-enabling a disabled account or adding an entitlement is a quieter escalation path than granting admin outright. Use for: user account changes, modified users, entitlement changes, who changed a user account, updateUser, account attribute modification, reactivated accounts."
+        ]
+      },
+      {
+        "id": "59e4a15ef90b45d69451a9b481d99edf",
+        "question": [
+          "detect_verbose_audit_logging_disabled"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.request_params['workspaceConfValues'] AS set_to,\n",
+          "      CASE WHEN lower(COALESCE(a.request_params['workspaceConfValues'], '')) = 'false'\n",
+          "           THEN 'CRITICAL - audit logging disabled, visibility gap starts here'\n",
+          "           ELSE 'INFO - audit logging enabled' END,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      CAST(a.workspace_id AS STRING),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.action_name = 'workspaceConfEdit'\n",
+          "      AND a.request_params['workspaceConfKeys'] = 'enableVerboseAuditLogs'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, set_to, severity, status, actor, workspace_id, source_ip, user_agent)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Changes to the enableVerboseAuditLogs workspace setting, both disables and re-enables. MITRE T1562.008 Impair Defenses: Disable Cloud Logs, TA0005 Defense Evasion. RUN THIS FIRST IN ANY INVESTIGATION: while verbose logging is off, workspaceConfEdit and notebook-level actions may never be recorded, so every other detection has a blind spot for that period and any absence of evidence afterwards is uninterpretable. Both directions are returned so the gap can be bounded at both ends. Use for: was audit logging disabled, verbose audit logging, who turned off logging, defense evasion, log tampering, audit gap, is my audit trail complete."
+        ]
+      },
+      {
+        "id": "60d44ea555dc417f940a5d134100a846",
+        "question": [
+          "detect_token_scanning_activity"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.request_params['tokenId'] AS token_id,\n",
+          "      COUNT(DISTINCT regexp_replace(a.source_ip_address, ':[0-9]+$', '')) AS distinct_ips,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(regexp_replace(a.source_ip_address, ':[0-9]+$', ''))) AS source_ips,\n",
+          "      MIN(a.event_time) AS first_seen,\n",
+          "      MAX(a.event_time) AS last_seen,\n",
+          "      COUNT(*) AS attempts,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.request_params['authenticationMethod'] = 'API_EXT_PAT_TOKEN'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND a.request_params['tokenId'] IS NOT NULL\n",
+          "    GROUP BY a.request_params['tokenId']\n",
+          ") AS results(token_id, distinct_ips, source_ips, first_seen, last_seen, attempts, actors, user_agents)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Personal access tokens (authenticationMethod API_EXT_PAT_TOKEN) grouped by token, showing how many distinct source IPs presented each one. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials. A single token presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, token abuse, stolen access token, is a token compromised, token used from many IPs."
+        ]
+      },
+      {
+        "id": "6545046b43ec47be96d431042f41a55e",
+        "question": [
+          "detect_sso_config_changed"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (\n",
+          "        lower(a.action_name) LIKE '%sso%'\n",
+          "        OR lower(a.action_name) LIKE '%samlconfig%'\n",
+          "        OR lower(a.action_name) LIKE '%identityprovider%'\n",
+          "        OR (a.action_name = 'workspaceConfEdit'\n",
+          "            AND lower(COALESCE(a.request_params['workspaceConfKeys'], '')) LIKE '%sso%')\n",
+          "      )\n",
+          ") AS results(event_time, action, status, actor, source_ip, user_agent, audit_level, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Single sign-on / identity provider configuration changed. MITRE T1556 Modify Authentication Process, T1484 Domain or Tenant Policy Modification. Repointing SSO at an attacker-controlled IdP, or disabling it, subverts authentication for every user at once -- among the highest-impact changes in the account. Use for: SSO changes, identity provider changed, SAML configuration, who changed SSO settings, authentication configuration changes, IdP modified."
+        ]
+      },
+      {
+        "id": "66e906da4808499696a4e277a3aed9dc",
+        "question": [
+          "detect_workspace_admin_granted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.action_name IN ('setAdmin','removeAdmin') THEN 'DIRECT' ELSE 'VIA_GROUP' END,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      COALESCE(a.request_params['targetUserName'], a.request_params['target_user_name']),\n",
+          "      COALESCE(a.request_params['targetGroupName'], a.request_params['target_group_name']),\n",
+          "      CAST(a.workspace_id AS STRING),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (\n",
+          "        a.action_name IN ('setAdmin', 'removeAdmin')\n",
+          "        OR (\n",
+          "          a.service_name = 'accounts'\n",
+          "          AND a.action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup')\n",
+          "          AND '' IS NOT NULL AND trim('') <> ''\n",
+          "          -- array_contains over a split, NOT `IN (SELECT explode(...))`. The\n",
+          "          -- subquery form creates fine on a SQL warehouse but FAILS inside a UDF\n",
+          "          -- body on DBR (notebook/spark.sql), so the notebook installer could not\n",
+          "          -- create these three functions while the CLI installer could. Verified\n",
+          "          -- live 2026-08-27. Keep this form -- it works on both.\n",
+          "          AND array_contains(\n",
+          "                transform(split('', ','), x -> trim(x)),\n",
+          "                COALESCE(a.request_params['targetGroupName'],\n",
+          "                         a.request_params['target_group_name']))\n",
+          "        )\n",
+          "      )\n",
+          ") AS results(event_time, grant_path, action, status, actor, target, target_group, workspace_id, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Workspace administrator privilege granted, directly (setAdmin) or by adding a principal to a workspace-admin group named in admin_groups. MITRE T1098, TA0004 Privilege Escalation. A workspace admin can read every notebook, alter every job, and change workspace security settings. Use for: who was made workspace admin, workspace admin grants, new admins on a workspace, setAdmin, privilege escalation in a workspace."
+        ]
+      },
+      {
+        "id": "7029341819894e018805a95fb89d71bb",
+        "question": [
+          "detect_session_multi_device"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.session_id,\n",
+          "      MAX(a.user_identity.email) AS actor,\n",
+          "      COUNT(DISTINCT a.source_ip_address) AS distinct_ips,\n",
+          "      COUNT(DISTINCT a.user_agent) AS distinct_agents,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.source_ip_address)) AS source_ips,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,\n",
+          "      MIN(a.event_time) AS first_seen,\n",
+          "      MAX(a.event_time) AS last_seen,\n",
+          "      COUNT(*) AS events\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin')\n",
+          "      AND a.session_id IS NOT NULL\n",
+          "      AND NOT a.source_ip_address RLIKE '^(10\\\\..*|192\\\\.168\\\\..*|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\..*)$'\n",
+          "      AND NOT lower(COALESCE(a.user_agent, '')) RLIKE\n",
+          "          'databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming'\n",
+          "    GROUP BY a.session_id\n",
+          "    HAVING COUNT(DISTINCT a.source_ip_address) > 1\n",
+          "        OR COUNT(DISTINCT a.user_agent) > 1\n",
+          ") AS results(session_id, actor, distinct_ips, distinct_agents, source_ips, user_agents, first_seen, last_seen, events)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "A single session id used from more than one public IP or more than one user agent. MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. This is the strongest session signal available in audit data: one session belongs to one browser on one machine, and a legitimate user changing network gets a NEW session rather than carrying the old one. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, same session from different devices, session used from two IPs, hijacked session, session anomaly."
+        ]
+      },
+      {
+        "id": "8e62df03d018480096a1654cb8ffb798",
+        "question": [
+          "detect_bulk_notebook_export"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  -- The CTE chain is wrapped in a subquery deliberately. A SQL UDF body cannot\n",
+          "    -- begin with a top-level WITH: the CREATE fails with an opaque\n",
+          "    -- \"request failed due to an unexpected condition\" (no parse error, no line\n",
+          "    -- number). Verified live -- the identical query runs standalone but the CREATE\n",
+          "    -- is rejected until the WITH sits inside SELECT * FROM ( ... ).\n",
+          "    SELECT * FROM (\n",
+          "    WITH exports AS (\n",
+          "      SELECT\n",
+          "        to_date(a.event_time) AS event_date,\n",
+          "        a.user_identity.email AS actor,\n",
+          "        a.request_params['notebookFullPath'] AS notebook_path,\n",
+          "        a.request_params['workspaceExportFormat'] AS export_format\n",
+          "      FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "      WHERE a.action_name = 'workspaceExport'\n",
+          "        AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "        AND NOT contains(COALESCE(a.request_params['notebookFullPath'], ''),\n",
+          "                         COALESCE(a.user_identity.email, ' '))\n",
+          "    ),\n",
+          "    per_user_day AS (\n",
+          "      SELECT event_date, actor,\n",
+          "             COUNT(DISTINCT notebook_path) AS notebooks_exported,\n",
+          "             CONCAT_WS('/', COLLECT_SET(export_format)) AS formats_used\n",
+          "      FROM exports\n",
+          "      GROUP BY event_date, actor\n",
+          "    ),\n",
+          "    baseline AS (\n",
+          "      SELECT * FROM per_user_day\n",
+          "      WHERE event_date < date_sub(current_date(), 2)\n",
+          "    ),\n",
+          "    per_user_threshold AS (\n",
+          "      SELECT\n",
+          "        actor,\n",
+          "        percentile_approx(notebooks_exported, 0.5) AS median,\n",
+          "        (percentile_approx(notebooks_exported, 0.75)\n",
+          "         - percentile_approx(notebooks_exported, 0.25)) AS iqr,\n",
+          "        (percentile_approx(notebooks_exported, 0.75)\n",
+          "         + 5.0 * GREATEST(\n",
+          "             percentile_approx(notebooks_exported, 0.75)\n",
+          "             - percentile_approx(notebooks_exported, 0.25),\n",
+          "             CAST(100 AS DOUBLE))) AS user_threshold\n",
+          "      FROM baseline\n",
+          "      GROUP BY actor\n",
+          "    )\n",
+          "    SELECT\n",
+          "      d.event_date,\n",
+          "      d.actor,\n",
+          "      d.notebooks_exported,\n",
+          "      ROUND(COALESCE(t.user_threshold, CAST(600 AS DOUBLE)), 1),\n",
+          "      ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1),\n",
+          "      ROUND(t.median, 1),\n",
+          "      d.formats_used,\n",
+          "      CONCAT(CAST(d.notebooks_exported AS STRING), ' notebooks exported (threshold ',\n",
+          "             CAST(ROUND(COALESCE(t.user_threshold, CAST(600 AS DOUBLE)), 1) AS STRING),\n",
+          "             ', formats: ', d.formats_used, ')')\n",
+          "    FROM per_user_day AS d\n",
+          "    LEFT JOIN per_user_threshold AS t ON d.actor = t.actor\n",
+          "    WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(600 AS DOUBLE))\n",
+          "    )\n",
+          ") AS results(event_date, actor, notebooks_exported, threshold_applied, iqrs_from_median, baseline_median, formats_used, analysis)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration, and it is deliberately NOT covered by the general download detection, which excludes SOURCE-format exports as normal development -- the exact format bulk code theft uses. Self-exports from a principal own home directory are excluded as platform tooling; first-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration."
+        ]
+      },
+      {
+        "id": "8f55801a8c8a4a369b9699e8c3a512a2",
+        "question": [
+          "detect_session_high_count_per_ip"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.source_ip_address AS source_ip,\n",
+          "      COUNT(DISTINCT a.session_id) AS distinct_sessions,\n",
+          "      COUNT(DISTINCT a.user_identity.email) AS distinct_actors,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,\n",
+          "      MIN(a.event_time) AS first_seen,\n",
+          "      MAX(a.event_time) AS last_seen,\n",
+          "      COUNT(*) AS events\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND a.session_id IS NOT NULL\n",
+          "      AND NOT a.source_ip_address RLIKE '^(10\\\\..*|192\\\\.168\\\\..*|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\..*)$'\n",
+          "      AND NOT lower(COALESCE(a.user_agent, '')) RLIKE\n",
+          "          'databricks|databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming|rawdbhttpclient|mlflow-python|feature-store'\n",
+          "    GROUP BY a.source_ip_address\n",
+          "    HAVING COUNT(DISTINCT a.session_id) >= 5\n",
+          ") AS results(source_ip, distinct_sessions, distinct_actors, actors, user_agents, first_seen, last_seen, events)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Public source IPs producing an unusually high number of distinct sessions, with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs and Databricks service agents are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse."
+        ]
+      },
+      {
+        "id": "986fc482dfdf40cca1d047bd133fd30f",
+        "question": [
+          "detect_user_account_deleted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      COALESCE(a.request_params['targetUserName'], a.request_params['targetUserId']),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name = 'delete'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, status, actor, target_user, source_ip, user_agent, audit_level)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "User accounts deleted. MITRE T1531 Account Access Removal. Mass deletion is destructive; deleting one account shortly after using it can be cleanup of an attacker-created identity. Use for: deleted user accounts, who removed a user, account deletion, offboarding events, removed identities."
+        ]
+      },
+      {
+        "id": "a01b7b508bf64b4d8d6ba6424aa0ddc6",
+        "question": [
+          "detect_non_sso_login"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['authentication_method'],\n",
+          "      CAST(a.workspace_id AS STRING),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('login', 'certLogin', 'jwtLogin', 'mfaLogin',\n",
+          "                            'passwordVerifyAuthentication', 'samlLogin')\n",
+          "      AND COALESCE(a.request_params['authentication_method'], '') <> 'BROWSER_BYO_IDP_SAML'\n",
+          "      AND a.response.status_code = 200\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, action, actor, auth_method, workspace_id, source_ip, user_agent, audit_level)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Successful logins that did NOT use the configured SAML IdP (authentication_method is not BROWSER_BYO_IDP_SAML). MITRE T1078 Valid Accounts. These bypass IdP-enforced MFA and conditional access, so they are the logins your identity provider never saw. Use for: non-SSO logins, logins that bypassed SSO, password logins, who logged in without SSO, SSO bypass, authentication method anomalies, local logins."
+        ]
+      },
+      {
+        "id": "a0e6ed3c5f624b89afe4f44cddeb194e",
+        "question": [
+          "detect_data_movement_downloads"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      to_date(a.event_time) AS event_date,\n",
+          "      a.user_identity.email AS actor,\n",
+          "      a.action_name AS action,\n",
+          "      COUNT(*) AS downloads,\n",
+          "      COUNT(DISTINCT a.source_ip_address) AS distinct_ips,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.source_ip_address)) AS source_ips,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,\n",
+          "      MIN(a.event_time) AS first_seen,\n",
+          "      MAX(a.event_time) AS last_seen\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (\n",
+          "        a.action_name IN ('downloadPreviewResults', 'downloadLargeResults', 'filesGet',\n",
+          "                          'getModelVersionDownloadUri', 'getModelVersionSignedDownloadUri')\n",
+          "        OR (a.action_name = 'workspaceExport'\n",
+          "            AND COALESCE(a.request_params['workspaceExportFormat'], '') <> 'SOURCE')\n",
+          "        OR (a.action_name = 'downloadQueryResult'\n",
+          "            AND COALESCE(a.request_params['fileType'], '') <> 'arrows')\n",
+          "      )\n",
+          "    GROUP BY to_date(a.event_time), a.user_identity.email, a.action_name\n",
+          ") AS results(event_date, actor, action, downloads, distinct_ips, source_ips, user_agents, first_seen, last_seen)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Data leaving the workspace via download or export, AGGREGATED per actor, action and day: downloadPreviewResults, downloadLargeResults, filesGet, getModelVersionDownloadUri, getModelVersionSignedDownloadUri, workspaceExport (excluding SOURCE format, which is normal source control) and downloadQueryResult (excluding arrows, which is UI rendering). MITRE T1567, TA0010 Exfiltration. Deliberately aggregated, not row-per-event: this is the highest-volume detection here (227,000+ filesGet events from 6 actors in one reference 90-day window), so per-event rows would be unreadable and would truncate. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, result downloads, data leaving the workspace, exfiltration via download, download volume by user."
+        ]
+      },
+      {
+        "id": "a2281b1751f74268a05dfe6e33ad7789",
+        "question": [
+          "detect_access_token_created"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))\n",
+          "             - unix_timestamp(a.event_time)) / 3600 / 24, 0),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name = 'generateDbToken'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))\n",
+          "             - unix_timestamp(a.event_time)) / 3600 / 24, 0) > 0\n",
+          ") AS results(event_time, status, actor, token_lifetime_days, source_ip, user_agent, audit_level, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime."
+        ]
+      },
+      {
+        "id": "a32352cedbc54514b6cc407226062865",
+        "question": [
+          "detect_ip_acl_validation_failures"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      MAX(a.event_time),\n",
+          "      MAX(a.audit_level),\n",
+          "      COALESCE(a.user_identity.email, a.request_params['user']),\n",
+          "      a.request_params['sourceIpAddress'],\n",
+          "      MAX(a.source_ip_address),\n",
+          "      MAX(a.user_agent),\n",
+          "      COUNT(*)\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.action_name = 'accountIpAclsValidationFailed'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "    GROUP BY COALESCE(a.user_identity.email, a.request_params['user']),\n",
+          "             a.request_params['sourceIpAddress']\n",
+          ") AS results(event_time, audit_level, actor, rejected_ip, request_ip, user_agent, attempts)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Account-level IP ACL validation failures (accountIpAclsValidationFailed), aggregated per identity and rejected IP. Carries the offending IP, unlike the ACL mutation events. Many distinct IPs from one identity can indicate probing for an allowed range; a single repeated IP is usually a user outside the corporate network. Use for: failed IP access list checks, rejected IP addresses, who was blocked by the account IP ACL, IP ACL validation errors, accountIpAclsValidationFailed, access blocked by IP policy."
+        ]
+      },
+      {
+        "id": "aa8f013c5b6e41bba145d9de8f0ab499",
+        "question": [
+          "detect_denied_ip_logon_attempts"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      MAX(a.event_time),\n",
+          "      MIN(a.event_time),\n",
+          "      COALESCE(a.user_identity.email, a.request_params['user']),\n",
+          "      a.source_ip_address,\n",
+          "      COUNT(*),\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.request_params['path'])),\n",
+          "      MAX(a.user_agent),\n",
+          "      CAST(MAX(a.workspace_id) AS STRING)\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.action_name = 'IpAccessDenied'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "    GROUP BY COALESCE(a.user_identity.email, a.request_params['user']),\n",
+          "             a.source_ip_address\n",
+          ") AS results(last_seen, first_seen, actor, source_ip, attempts, paths, user_agent, workspace_id)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Login and API attempts rejected by IP access lists (IpAccessDenied), aggregated per identity and source IP with the blocked endpoints. Use for: blocked login attempts, denied IP addresses, who was blocked by the allow list, access denied events, attempts from unauthorized IPs, brute force from blocked IPs, IpAccessDenied."
+        ]
+      },
+      {
+        "id": "ae20149784064ef780ed528aabf26986",
+        "question": [
+          "detect_mfa_key_changes"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['id'],\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('mfaAddKey', 'mfaDeleteKey')\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, action, status, actor, key_id, source_ip, user_agent, audit_level)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "MFA keys added or removed (mfaAddKey, mfaDeleteKey). MITRE T1556 Modify Authentication Process. Removing MFA weakens an account; ADDING an attacker-controlled key to a compromised account is a persistence mechanism that survives a password reset. Use for: MFA changes, who removed MFA, new MFA device registered, multi-factor authentication changes, mfaAddKey, mfaDeleteKey, authentication weakened."
+        ]
+      },
+      {
+        "id": "af73ca4b027748c894f0015adc555773",
+        "question": [
+          "detect_config_changes_account_level"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.service_name,\n",
+          "      a.request_params['settingName'],\n",
+          "      a.request_params['settingKeyName'],\n",
+          "      a.request_params['settingValueForAudit'],\n",
+          "      a.request_params['settingTypeName'],\n",
+          "      a.user_identity.email,\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.audit_level = 'ACCOUNT_LEVEL'\n",
+          "      AND a.action_name = 'setSetting'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, service_name, setting_name, setting_key, new_value, setting_type, actor, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Account-level setting changes (setSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. Use for: account level configuration changes, account settings modified, what changed at the account level, setSetting events, account-wide config changes, who changed an account setting."
+        ]
+      },
+      {
+        "id": "b11c42cc4f0742d6bb8ff5aa2255ca8c",
+        "question": [
+          "detect_investigation_triage"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.user_identity.email,\n",
+          "      a.source_ip_address,\n",
+          "      CAST(COUNT(DISTINCT a.action_name) AS INT),\n",
+          "      CAST(COUNT(DISTINCT CASE\n",
+          "        WHEN a.action_name IN ('createIpAccessList','updateIpAccessList','deleteIpAccessList','IpAccessDenied','accountIpAclsValidationFailed') THEN 'ip_acl'\n",
+          "        WHEN a.action_name IN ('workspaceConfEdit','setSetting') THEN 'config'\n",
+          "        WHEN a.action_name IN ('setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment') THEN 'admin_role'\n",
+          "        WHEN a.action_name IN ('createGroup','removeGroup','addPrincipalToGroup','addPrincipalsToGroup','updateUser','changePassword','mfaAddKey','mfaDeleteKey') THEN 'identity'\n",
+          "        WHEN a.action_name IN ('generateDbToken','revokeDbToken') THEN 'credential'\n",
+          "        WHEN a.action_name IN ('getSecret','putSecret','listScopes') THEN 'secret'\n",
+          "        WHEN a.action_name IN ('createStorageCredential','updateStorageCredential','mount','updateMetastore') THEN 'storage'\n",
+          "        WHEN a.action_name IN ('downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport') THEN 'data_movement'\n",
+          "        ELSE 'other'\n",
+          "      END) AS INT),\n",
+          "      COUNT(CASE WHEN a.response.status_code <> 200 THEN 1 END),\n",
+          "      COUNT(*),\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.action_name)),\n",
+          "      MIN(a.event_time),\n",
+          "      MAX(a.event_time)\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND a.user_identity.email IS NOT NULL\n",
+          "      AND a.action_name IN (\n",
+          "        'createIpAccessList','updateIpAccessList','deleteIpAccessList','IpAccessDenied','accountIpAclsValidationFailed',\n",
+          "        'workspaceConfEdit','setSetting',\n",
+          "        'setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment',\n",
+          "        'createGroup','removeGroup','addPrincipalToGroup','addPrincipalsToGroup','updateUser','changePassword','mfaAddKey','mfaDeleteKey',\n",
+          "        'generateDbToken','revokeDbToken',\n",
+          "        'getSecret','putSecret','listScopes',\n",
+          "        'createStorageCredential','updateStorageCredential','mount','updateMetastore',\n",
+          "        'downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport'\n",
+          "      )\n",
+          "    GROUP BY a.user_identity.email, a.source_ip_address\n",
+          "    ORDER BY 3 DESC, 5 DESC, 6 DESC\n",
+          "    LIMIT 50\n",
+          ") AS results(actor, source_ip, distinct_sensitive_actions, families_touched, failed_attempts, total_sensitive_events, sensitive_action_types, first_seen, last_seen)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Investigation triage and starting point: ranks actors and their source IPs by how many distinct security-sensitive control actions they touched in the window (breadth across families first, then failed attempts, then volume), so the investigation lead surfaces without a raw sweep. Excludes routine logins by design. Run this FIRST for any open-ended investigation, then pivot on the top actor/IP with the per-family detection queries. Use for: where do I start, triage, who looks suspicious, rank actors by risk, investigation starting point, who touched the most security controls, find the lead, who should I investigate first, suspicious activity overview, prioritize actors for review."
+        ]
+      },
+      {
+        "id": "cfb8a1f6e7ad425e9dc4ce12514753b0",
+        "question": [
+          "detect_secrets_discovery"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      to_date(a.event_time) AS event_date,\n",
+          "      a.user_identity.email AS actor,\n",
+          "      SUM(CASE WHEN a.action_name = 'listScopes' THEN 1 ELSE 0 END) AS scopes_enumerated,\n",
+          "      SIZE(COLLECT_SET(CONCAT(COALESCE(a.request_params['scope'], ''), ':',\n",
+          "                              COALESCE(a.request_params['key'], '')))) AS secrets_used,\n",
+          "      MAX(a.service_name) AS service_name\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.action_name IN ('listScopes', 'getSecret')\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          "    GROUP BY to_date(a.event_time), a.user_identity.email\n",
+          "    HAVING SUM(CASE WHEN a.action_name = 'listScopes' THEN 1 ELSE 0 END) >= 5\n",
+          "       AND SIZE(COLLECT_SET(CONCAT(COALESCE(a.request_params['scope'], ''), ':',\n",
+          "                                   COALESCE(a.request_params['key'], '')))) >= 5\n",
+          ") AS results(event_date, actor, scopes_enumerated, secrets_used, service_name)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Secret discovery behaviour: an identity that both enumerates secret scopes (listScopes) and reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
+        ]
+      },
+      {
+        "id": "d3884f9bb6484b79b84a8d1b8df4dbd9",
+        "question": [
+          "detect_ip_access_list_changes"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      CAST(a.workspace_id AS STRING),\n",
+          "      a.request_params['ipAccessListId'],\n",
+          "      CAST(ROW_NUMBER() OVER (\n",
+          "        PARTITION BY a.request_params['ipAccessListId'] ORDER BY a.event_time\n",
+          "      ) AS INT),\n",
+          "      CASE\n",
+          "        WHEN a.action_name = 'deleteIpAccessList' THEN 'HIGH - IP access list deleted'\n",
+          "        ELSE 'MEDIUM - IP access list modified'\n",
+          "      END,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('createIpAccessList', 'updateIpAccessList', 'deleteIpAccessList')\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, action, status, actor, source_ip, user_agent, workspace_id, ip_access_list_id, change_seq, severity, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "IP access list creations, updates and deletions: which list, who, when, from where, with what client. MITRE T1484 Domain or Tenant Policy Modification. IMPORTANT: the audit log does NOT contain the CIDR/IP values for these events, so a before/after IP diff cannot be produced from audit data -- report the changelog and resolve ip_access_list_id against the IP Access Lists REST API for current CIDRs. Use for: who changed the IP allow list, IP access list history, was our allow list modified, who deleted an IP access list, IP allowlist changelog, network access control changes, allow list audit trail."
+        ]
+      },
+      {
+        "id": "d6d3113f08604d7d9ee124e6a06b606c",
+        "question": [
+          "detect_group_changes"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.action_name IN ('createGroup','removeGroup')\n",
+          "           THEN 'GROUP_LIFECYCLE' ELSE 'MEMBERSHIP' END,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      COALESCE(a.request_params['targetGroupName'],\n",
+          "               a.request_params['target_group_name'],\n",
+          "               a.request_params['targetGroupId']),\n",
+          "      COALESCE(a.request_params['targetUserName'],\n",
+          "               a.request_params['target_user_name'],\n",
+          "               a.request_params['principals']),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.audit_level,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('createGroup', 'removeGroup', 'addPrincipalToGroup',\n",
+          "                            'addPrincipalsToGroup', 'removePrincipalFromGroup')\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, action, change_kind, status, actor, group_name, target_user, source_ip, user_agent, audit_level, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Group creation, deletion and membership changes (createGroup, removeGroup, addPrincipalToGroup, addPrincipalsToGroup, removePrincipalFromGroup). MITRE T1098 Account Manipulation. Groups carry entitlements and UC grants, so adding a principal to the right group is privilege escalation without ever touching an admin flag -- cross-check group_name against your admin and data-access groups. Use for: group changes, who was added to a group, group membership, new groups created, deleted groups, who joined an admin group, addPrincipalToGroup, group audit."
+        ]
+      },
+      {
+        "id": "e0000000000000000000000000000001",
+        "question": [
+          "Show the full timeline for an identity and every identity that shared its IP addresses"
+        ],
+        "sql": [
+          "WITH actor AS (\n",
+          "  SELECT email\n",
+          "  FROM `audit_demo_catalog`.`audit_demo`.`principals`\n",
+          "  WHERE lower(:actor) IN (lower(email), lower(display_name), lower(split_part(email, '@', 1)))\n",
+          "),\n",
+          "actor_ips AS (\n",
+          "  SELECT DISTINCT a.source_ip_address AS ip\n",
+          "  FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "  JOIN actor ON a.user_identity.email = actor.email\n",
+          "  WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "),\n",
+          "shared_ips AS (\n",
+          "  SELECT a.source_ip_address AS ip\n",
+          "  FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "  JOIN actor_ips AS i ON a.source_ip_address = i.ip\n",
+          "  WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "  GROUP BY a.source_ip_address\n",
+          "  HAVING count(DISTINCT a.user_identity.email) BETWEEN 2 AND 5\n",
+          ")\n",
+          "SELECT\n",
+          "  a.event_time,\n",
+          "  coalesce(p.display_name, a.user_identity.email) AS identity,\n",
+          "  a.user_identity.email AS identity_id,\n",
+          "  a.source_ip_address,\n",
+          "  a.service_name,\n",
+          "  a.action_name,\n",
+          "  a.response.status_code AS status_code,\n",
+          "  a.user_agent,\n",
+          "  a.request_params\n",
+          "FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "JOIN shared_ips AS s ON a.source_ip_address = s.ip\n",
+          "LEFT JOIN `audit_demo_catalog`.`audit_demo`.`principals` AS p ON p.email = a.user_identity.email\n",
+          "WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "ORDER BY a.event_time\n",
+          "LIMIT 500"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          },
+          {
+            "name": "actor",
+            "type_hint": "STRING",
+            "default_value": {
+              "values": [
+                "maria.lopez"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Timeline of all audit events from the IP addresses that the identity used and that 2 to 5 identities shared in the window (an IP address that many identities use is a corporate egress, not a lead). Set :actor to a name, an email, or the part of the email before '@'. Use for: timeline for a user and every identity that shared their IP, who else used this IP, pivot from a user to a service principal, identity pivot, what happened from the attacker IP. If it returns no rows, the identity shared no IP address: use the trusted detection queries for that identity."
+        ]
+      },
+      {
+        "id": "e0000000000000000000000000000002",
+        "question": [
+          "What did the attacker do after reading secrets?"
+        ],
+        "sql": [
+          "WITH reads AS (\n",
+          "  SELECT actor, src_ip, min(event_time) AS read_time\n",
+          "  FROM `audit_demo_catalog`.`audit_demo`.`demo_signals`\n",
+          "  WHERE stage = '3' AND startswith(rule, 'ada_') AND coalesce(src_ip, '') <> ''\n",
+          "    AND event_time BETWEEN :start_time AND :end_time\n",
+          "  GROUP BY actor, src_ip\n",
+          ")\n",
+          "SELECT\n",
+          "  coalesce(rp.display_name, r.actor) AS secret_reader,\n",
+          "  r.src_ip,\n",
+          "  r.read_time,\n",
+          "  a.event_time,\n",
+          "  coalesce(p.display_name, a.user_identity.email) AS identity,\n",
+          "  a.user_identity.email AS identity_id,\n",
+          "  a.service_name,\n",
+          "  a.action_name,\n",
+          "  a.response.status_code AS status_code,\n",
+          "  a.user_agent,\n",
+          "  a.request_params\n",
+          "FROM reads AS r\n",
+          "JOIN `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "  ON a.source_ip_address = r.src_ip\n",
+          "  AND a.event_time > r.read_time\n",
+          "  AND a.event_time <= r.read_time + INTERVAL 24 HOURS\n",
+          "LEFT JOIN `audit_demo_catalog`.`audit_demo`.`principals` AS p ON p.email = a.user_identity.email\n",
+          "LEFT JOIN `audit_demo_catalog`.`audit_demo`.`principals` AS rp ON rp.email = r.actor\n",
+          "ORDER BY a.event_time\n",
+          "LIMIT 500"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Starts from the secret-harvest signals (stage 3, ada_ rules) in demo_signals and lists every audit event from the same IP address in the 24 hours after the first read, by any identity. Use for: what happened after secrets were read, what did the attacker do next, how were the stolen secrets used, events after the secret harvest."
+        ]
+      },
+      {
+        "id": "e314976d93bd436a99df52f6759199db",
+        "question": [
+          "detect_session_multi_ip_logins"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.user_identity.email AS actor,\n",
+          "      COUNT(DISTINCT a.source_ip_address) AS distinct_ips,\n",
+          "      COUNT(*) AS logins,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.source_ip_address)) AS source_ips,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,\n",
+          "      MIN(a.event_time) AS first_seen,\n",
+          "      MAX(a.event_time) AS last_seen\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND a.service_name = 'accounts'\n",
+          "      AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin')\n",
+          "      AND a.user_identity.email IS NOT NULL\n",
+          "      AND NOT a.source_ip_address RLIKE '^(10\\\\..*|192\\\\.168\\\\..*|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\..*)$'\n",
+          "      AND NOT lower(COALESCE(a.user_agent, '')) RLIKE\n",
+          "          'databricks|databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming|rawdbhttpclient|mlflow-python|feature-store|dbr:'\n",
+          "    GROUP BY a.user_identity.email\n",
+          "    HAVING COUNT(DISTINCT a.source_ip_address) >= 5\n",
+          ") AS results(actor, distinct_ips, logins, source_ips, user_agents, first_seen, last_seen)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Identities that logged in from several distinct PUBLIC IP addresses within the window. MITRE T1078 Valid Accounts, T1550 Use Alternate Authentication Material. Private (RFC1918) IPs and known Databricks service user agents are excluded, because both legitimately appear from many hosts. Travel, VPN switching and mobile networks are common benign explanations -- geographic impossibility is the discriminator, and that needs IP geolocation this function does not do. Use for: session hijacking, logins from multiple IPs, impossible travel, account sharing, suspicious login locations, compromised credentials, one user many locations."
+        ]
+      },
+      {
+        "id": "ee355dbeca7f49b191ab6943ecfb7962",
+        "question": [
+          "detect_metastore_admin_granted"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      CASE WHEN a.action_name = 'updateMetastore' THEN 'DIRECT' ELSE 'VIA_GROUP' END,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
+          "      a.user_identity.email,\n",
+          "      a.request_params['owner'],\n",
+          "      COALESCE(a.request_params['targetGroupName'], a.request_params['target_group_name']),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent,\n",
+          "      a.request_params\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
+          "      AND (\n",
+          "        (a.action_name = 'updateMetastore' AND a.request_params['owner'] IS NOT NULL)\n",
+          "        OR (\n",
+          "          a.service_name = 'accounts'\n",
+          "          AND a.action_name IN ('addPrincipalToGroup', 'addPrincipalsToGroup')\n",
+          "          AND '' IS NOT NULL AND trim('') <> ''\n",
+          "          -- array_contains over a split, NOT `IN (SELECT explode(...))`. The\n",
+          "          -- subquery form creates fine on a SQL warehouse but FAILS inside a UDF\n",
+          "          -- body on DBR (notebook/spark.sql), so the notebook installer could not\n",
+          "          -- create these three functions while the CLI installer could. Verified\n",
+          "          -- live 2026-08-27. Keep this form -- it works on both.\n",
+          "          AND array_contains(\n",
+          "                transform(split('', ','), x -> trim(x)),\n",
+          "                COALESCE(a.request_params['targetGroupName'],\n",
+          "                         a.request_params['target_group_name']))\n",
+          "        )\n",
+          "      )\n",
+          ") AS results(event_time, grant_path, action, status, actor, new_owner, target_group, source_ip, user_agent, request_params)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Metastore administrator or owner changed (updateMetastore with an owner set), plus membership adds to metastore-admin groups named in admin_groups. MITRE T1098, TA0004 Privilege Escalation. A metastore admin controls Unity Catalog governance for every workspace sharing that metastore. Use for: who became metastore admin, metastore owner changed, Unity Catalog admin grants, updateMetastore, UC privilege escalation."
+        ]
+      },
+      {
+        "id": "fa9480cddab641e0990ec554b9546330",
+        "question": [
+          "detect_config_changes_workspace_level"
+        ],
+        "sql": [
+          "SELECT *\n",
+          "FROM (\n",
+          "  SELECT\n",
+          "      a.event_time,\n",
+          "      a.service_name,\n",
+          "      COALESCE(a.request_params['workspaceConfKeys'], 'unknown_key'),\n",
+          "      COALESCE(a.request_params['workspaceConfValues'], 'unknown_value'),\n",
+          "      a.user_identity.email,\n",
+          "      CAST(a.workspace_id AS STRING),\n",
+          "      a.source_ip_address,\n",
+          "      a.user_agent\n",
+          "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
+          "    WHERE a.action_name = 'workspaceConfEdit'\n",
+          "      AND a.event_time BETWEEN :start_time AND :end_time\n",
+          ") AS results(event_time, service_name, setting_key, new_value, actor, workspace_id, source_ip, user_agent)\n"
+        ],
+        "parameters": [
+          {
+            "name": "start_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now-30d/s"
+              ]
+            }
+          },
+          {
+            "name": "end_time",
+            "type_hint": "DATETIME",
+            "default_value": {
+              "values": [
+                "now/s"
+              ]
+            }
+          }
+        ],
+        "usage_guidance": [
+          "Every workspace-level configuration change (all workspaceConfEdit events) with the setting key and its new value. Broader than the high-priority function, which triages only the security-relevant subset -- use this one when you need a COMPLETE workspace config changelog. MITRE T1484 Domain or Tenant Policy Modification. Use for: all workspace configuration changes, complete config changelog, every setting that changed, workspace settings audit, what settings were modified, workspaceConfEdit."
+        ]
+      }
+    ]
+  }
+}

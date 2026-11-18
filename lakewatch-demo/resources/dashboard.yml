@@ -1,0 +1,10 @@
+# The AI/BI dashboard. Source: dashboard/build_dashboard.py (writes the JSON; --verify runs the datasets).
+# The datasets use bare table names; dataset_catalog/dataset_schema point them at the demo schema.
+resources:
+  dashboards:
+    databricks_audit_dashboard:
+      display_name: "Databricks audit demo"
+      file_path: ../dashboard/databricks_audit.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${resources.schemas.databricks_audit_demo.name}

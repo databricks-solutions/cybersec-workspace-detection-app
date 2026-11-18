@@ -1,0 +1,90 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_multi_stage_identity
+description: One identity has stage signals in three or more distinct attack stages within 24 hours.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  Correlation over the signals of the stage rules. Each stage rule sees one step (access,
+  discovery, credential access, execution, persistence, exfiltration) and alone it is often
+  benign. An identity that triggers rules of three or more different stages in one day is
+  probably in the hands of an attacker. The rule reads the signals of the ada_ stage rules of this
+  schema (the ported adp_ rules are not read), drops the identical signals of repeated runs, and for
+  each signal in the run window counts the distinct stages of the same identity in the 24 hours up
+  to it. Three or more is a finding, one per identity. False positives: an admin who does unusual
+  work in one day (new token, first secret listing, an export); check with the person.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+mitre:
+  - {taxonomy: Enterprise, tactic: Initial Access, technique_id: T1078, technique: Valid Accounts,
+     sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      -- The stage signals of this schema created in the last 90 minutes (any event time, so a 24-hour
+      -- window that starts before the run window keeps its earlier stages). The signals of earlier shows
+      -- stay in the table and would mix with this show's stages of the same identities. A reset runs this
+      -- rule minutes after the stage signals; 90 minutes covers the hourly schedule plus slack.
+      -- DISTINCT drops the identical signals of repeated runs.
+      WITH sig AS (
+        FROM `{{catalog}}`.`__lakewatch`.`signals`
+        |> WHERE created_at >= TIMERANGE_NOW() - INTERVAL 90 MINUTES AND event_time <= TIMERANGE_NOW()
+             AND startswith(rule_name, '{{catalog}}.{{schema}}.ada_')
+             AND rule_name NOT IN ('{{catalog}}.{{schema}}.ada_identity_pivot_chain',
+                                   '{{catalog}}.{{schema}}.ada_multi_stage_identity')
+        |> SELECT DISTINCT regexp_extract(rule_name, '([^.]+)$', 1) AS rule,
+                  get_json_object(context, '$.actor') AS actor,
+                  get_json_object(context, '$.actor_kind') AS actor_kind,
+                  get_json_object(context, '$.src_ip') AS src_ip,
+                  get_json_object(context, '$.stage') AS stage,
+                  event_time
+        |> WHERE actor IS NOT NULL AND actor <> '' AND try_cast(stage AS INT) BETWEEN 1 AND 6
+      ),
+      -- Per signal in the run window: the stages of the same identity in the 24 hours up to it.
+      windows AS (
+        FROM sig AS b
+        |> WHERE IN_TIMERANGE(b.event_time)
+        |> JOIN sig AS a
+             ON a.actor = b.actor
+            AND a.event_time >= b.event_time - INTERVAL 24 HOURS AND a.event_time <= b.event_time
+        |> AGGREGATE count(DISTINCT a.stage) AS n_stages, min(a.event_time) AS first_time,
+                     collect_set(a.stage) AS stage_set, collect_set(a.rule) AS rule_set,
+                     mode(IF(a.src_ip IN ('', 'null'), NULL, a.src_ip)) AS ip,
+                     max(a.actor_kind) AS actor_kind
+             GROUP BY b.actor AS actor, b.event_time AS time
+        |> WHERE n_stages >= 3
+      )
+      FROM windows
+      |> AGGREGATE max(time) AS time, min(first_time) AS first_time, max(actor_kind) AS actor_kind,
+                   array_sort(array_distinct(flatten(collect_list(stage_set)))) AS stage_list,
+                   array_sort(array_distinct(flatten(collect_list(rule_set)))) AS rule_list,
+                   -- the most frequent source IP (NULLs ignored)
+                   mode(ip) AS src_ip
+           GROUP BY actor
+      |> SELECT time, actor, actor_kind, coalesce(src_ip, '') AS src_ip, first_time,
+                array_join(stage_list, ', ') AS stages, array_join(rule_list, ', ') AS rules
+output:
+  # Stable per identity (no stage list), so a stage that arrives in a later run does not open a new alert.
+  summary: 'Several attack stages by one identity: {actor}'
+  event_time_column: time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: 'corr'
+    stages: '{stages}'
+    rules: '{rules}'
+  default_context: false
+timerange:
+  # Signals arrive up to one schedule interval after their event time.
+  extend_lookback: 8h
+runbook: |
+  1. Open the signals of the identity (demo_signals view) and order them by time: is it one story?
+  2. Look for a pivot from or to another identity (rule ada_identity_pivot_chain, same source IP).
+  3. If an attack: revoke the identity's tokens and sessions (rotate secrets for a service
+     principal) and review its grants, tokens, functions and exports.
