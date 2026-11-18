@@ -67,7 +67,7 @@
 @detect(output=Output.asDataFrame)
 def encoded_command_execution(earliest: str = None, latest: str = None, target_user: str = None):
     from pyspark.sql.functions import (col, current_timestamp, expr, to_timestamp,
-                                       upper, lit, when)
+                                       upper, lit, when, coalesce)
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 7 days")
     latest = latest or current_timestamp()
@@ -93,7 +93,9 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
             (col("statement_text").contains("printf") &
              col("statement_text").rlike(r"[0-9a-fA-F]{20,}") &
              (col("statement_text").contains("xxd") |
-              col("statement_text").rlike(r"\|\s*(ba)?sh\b")))
+              col("statement_text").rlike(r"\|\s*(ba)?sh\b"))) |
+            # secret() value encoded so result redaction does not apply
+            upper(col("statement_text")).rlike(r"(BASE64|HEX|ENCODE|REVERSE)\s*\(\s*SECRET\s*\(")
         )
     )
 
@@ -108,7 +110,9 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
         # First-match label for triage, NOT an exhaustive list: a statement that uses
         # more than one technique (e.g. both UNHEX( and base64) reports only the first
         # branch that matches, in the order below.
-        when(upper(col("statement_text")).contains("UNHEX("), lit("UNHEX"))
+        when(upper(col("statement_text")).rlike(r"(BASE64|HEX|ENCODE|REVERSE)\s*\(\s*SECRET\s*\("),
+             lit("secret encode (redaction bypass)"))
+        .when(upper(col("statement_text")).contains("UNHEX("), lit("UNHEX"))
         .when(col("statement_text").contains("xxd") & col("statement_text").contains("-r"), lit("xxd decode"))
         .when(col("statement_text").contains("base64"), lit("base64 decode"))
         .when(col("statement_text").contains("printf"), lit("printf hex"))
@@ -124,23 +128,43 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
     # submitCommand) as one-off submissions. On real workspaces "jobs" dwarfs "notebook"
     # by ~500x, and a scheduled job task is exactly where an encoded payload would live
     # (it also buys the attacker persistence and a schedule), so all three are in scope.
+    # Command Execution API 1.2 calls arrive as data-plane-router / commandExecute with
+    # the text in request_params.command (verbose audit logging on) -- a remote-execution
+    # path that needs no notebook at all.
+    cmd = coalesce(col("request_params.commandText"), col("request_params.command"))
+
+    # Secret redaction bypass: notebook output redacts secret values, so an actor encodes
+    # them first. Two shapes: an encoder applied directly to dbutils.secrets.get(...), or a
+    # command that lists scopes/keys, reads them and encodes (bulk dump).
+    secret_encode_direct = (
+        r"(b(16|32|64|85)encode|a85encode|hexlify|codecs\.encode)\s*\(\s*dbutils\.secrets\.get(Bytes)?\("
+        r"|dbutils\.secrets\.get(Bytes)?\([^)]*\)\s*(\.encode\([^)]*\))?\s*\.(hex|encode)\("
+        r"|\.join\(\s*(list\()?\s*dbutils\.secrets\.get\("
+        r"|for\s+\w+\s+in\s+dbutils\.secrets\.get\("
+    )
+    encoder = r"(b(16|32|64|85)encode|a85encode|hexlify|codecs\.encode|\.hex\(\))"
+    secret_encode = (
+        cmd.rlike(secret_encode_direct) |
+        (cmd.contains("dbutils.secrets.list") & cmd.contains("dbutils.secrets.get") & cmd.rlike(encoder))
+    )
+
     audit_filtered = audit.filter(
         (col("event_time").between(earliest, latest)) &
-        (col("service_name").isin("notebook", "jobs")) &
-        (col("action_name").isin("runCommand", "submitCommand")) &
         (
-            upper(col("request_params.commandText")).contains("UNHEX(") |
-            (col("request_params.commandText").contains("xxd") &
-             col("request_params.commandText").contains("-r")) |
+            (col("service_name").isin("notebook", "jobs") &
+             col("action_name").isin("runCommand", "submitCommand")) |
+            ((col("service_name") == "data-plane-router") & (col("action_name") == "commandExecute"))
+        ) &
+        (
+            upper(cmd).contains("UNHEX(") |
+            (cmd.contains("xxd") & cmd.contains("-r")) |
             # base64 decode on a word boundary — catches `base64 -d|bash`, `base64 -d<<<...`
-            (col("request_params.commandText").contains("base64") &
-             col("request_params.commandText").rlike(r"(--decode|-d)\b")) |
+            (cmd.contains("base64") & cmd.rlike(r"(--decode|-d)\b")) |
             # printf hex decode piped to a shell (or xxd). Require the executable pipe to
             # avoid firing on printf + a bare hex run, which co-occurs innocently.
-            (col("request_params.commandText").contains("printf") &
-             col("request_params.commandText").rlike(r"[0-9a-fA-F]{20,}") &
-             (col("request_params.commandText").contains("xxd") |
-              col("request_params.commandText").rlike(r"\|\s*(ba)?sh\b")))
+            (cmd.contains("printf") & cmd.rlike(r"[0-9a-fA-F]{20,}") &
+             (cmd.contains("xxd") | cmd.rlike(r"\|\s*(ba)?sh\b"))) |
+            secret_encode
         )
     )
 
@@ -150,16 +174,17 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
     audit_result = audit_filtered.select(
         to_timestamp(col("event_time")).alias("START_TIME"),
         col("user_identity.email").alias("SRC_USER"),
-        col("request_params.commandText").alias("STATEMENT_TEXT"),
-        col("request_params.commandId").alias("STATEMENT_ID"),
+        cmd.alias("STATEMENT_TEXT"),
+        coalesce(col("request_params.commandId"), col("request_params.context_id")).alias("STATEMENT_ID"),
         # First-match label for triage, NOT exhaustive — see note on the query-history branch.
-        when(upper(col("request_params.commandText")).contains("UNHEX("), lit("UNHEX"))
-        .when(col("request_params.commandText").contains("xxd") &
-              col("request_params.commandText").contains("-r"), lit("xxd decode"))
-        .when(col("request_params.commandText").contains("base64"), lit("base64 decode"))
-        .when(col("request_params.commandText").contains("printf"), lit("printf hex"))
+        when(secret_encode, lit("secret encode (redaction bypass)"))
+        .when(upper(cmd).contains("UNHEX("), lit("UNHEX"))
+        .when(cmd.contains("xxd") & cmd.contains("-r"), lit("xxd decode"))
+        .when(cmd.contains("base64"), lit("base64 decode"))
+        .when(cmd.contains("printf"), lit("printf hex"))
         .otherwise(lit("encoded payload")).alias("ENCODING_TECHNIQUE"),
-        lit("audit_log").alias("SOURCE")
+        when(col("action_name") == "commandExecute", lit("audit_log:command_execution_api"))
+        .otherwise(lit("audit_log")).alias("SOURCE")
     )
 
     return qh_result.union(audit_result).orderBy(col("START_TIME").desc())

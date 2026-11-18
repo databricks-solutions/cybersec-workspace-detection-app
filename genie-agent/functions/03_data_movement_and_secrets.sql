@@ -455,7 +455,8 @@ RETURN
 --     identity, which masks the real submitter behind an owner or service
 --     principal on scheduled/owned queries -- wrong for incident attribution.
 --   * system.access.audit  -- notebook and job command executions (runCommand,
---     submitCommand). service_name IN ('notebook','jobs') is load-bearing:
+--     submitCommand), plus Command Execution API 1.2 calls (data-plane-router /
+--     commandExecute, text in request_params.command, verbose audit only). service_name IN ('notebook','jobs') is load-bearing:
 --     verified live, `jobs` runCommand outnumbers `notebook` ~370x (133,143 vs
 --     356 in 30 days), and a scheduled job task is exactly where an encoded
 --     payload would live -- it also buys persistence and a schedule. Filtering
@@ -484,13 +485,13 @@ CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_encoded_command_execution
 RETURNS TABLE (
   event_time         TIMESTAMP COMMENT 'When the statement/command ran (UTC)',
   actor              STRING    COMMENT 'Submitter: executed_by (query history) or user_identity.email (audit)',
-  surface            STRING    COMMENT 'Where it ran: sql_warehouse, or the audit service_name (jobs / notebook)',
-  encoding_technique STRING    COMMENT 'First-match triage label (UNHEX / xxd decode / base64 decode / printf hex) -- NOT exhaustive',
+  surface            STRING    COMMENT 'Where it ran: sql_warehouse, jobs, notebook, or command_execution_api',
+  encoding_technique STRING    COMMENT 'First-match triage label (secret encode / UNHEX / xxd decode / base64 decode / printf hex) -- NOT exhaustive',
   source_ip          STRING    COMMENT 'Source IP (audit rows only; NULL for sql_warehouse -- query history carries none)',
   statement_id       STRING    COMMENT 'statement_id (query history) or commandId (audit), for pivoting',
   statement_text     STRING    COMMENT 'SENSITIVE: the full statement/command carrying the encoded payload. Redact before sharing.'
 )
-COMMENT 'SQL statements or notebook/job commands that decode a hex or base64 payload at runtime (UNHEX(), xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Observed in Databricks pen tests to hide curl exfiltration, reverse shells and credential harvesting from plain-text keyword detections. Reads BOTH system.query.history AND system.access.audit (notebook + job command events) -- requires SELECT on system.query.history. statement_text is the payload itself: SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation.'
+COMMENT 'SQL statements, notebook/job commands and Command Execution API calls that decode a hex or base64 payload at runtime (UNHEX(), xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command, or that ENCODE secret values (base64/hex of dbutils.secrets.get or SQL secret(), or a list-read-encode dump of scopes) to get past output redaction. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Observed in Databricks pen tests to hide curl exfiltration, reverse shells and credential harvesting from plain-text keyword detections. Reads BOTH system.query.history AND system.access.audit (notebook + job command events, and data-plane-router commandExecute when verbose audit logging is on) -- requires SELECT on system.query.history. statement_text is the payload itself: SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation, secret redaction bypass, secrets printed encoded, remote command execution API.'
 RETURN
   SELECT * FROM (
     SELECT
@@ -498,6 +499,7 @@ RETURN
       q.executed_by              AS actor,
       'sql_warehouse'            AS surface,
       CASE
+        WHEN upper(q.statement_text) RLIKE '(BASE64|HEX|ENCODE|REVERSE)\\s*\\(\\s*SECRET\\s*\\(' THEN 'secret encode (redaction bypass)'
         WHEN upper(q.statement_text) LIKE '%UNHEX(%'                        THEN 'UNHEX'
         WHEN q.statement_text LIKE '%xxd%' AND q.statement_text LIKE '%-r%' THEN 'xxd decode'
         WHEN q.statement_text LIKE '%base64%'                               THEN 'base64 decode'
@@ -515,31 +517,42 @@ RETURN
         OR (q.statement_text LIKE '%base64%' AND q.statement_text RLIKE '(--decode|-d)\\b')
         OR (q.statement_text LIKE '%printf%' AND q.statement_text RLIKE '[0-9a-fA-F]{20,}'
             AND (q.statement_text LIKE '%xxd%' OR q.statement_text RLIKE '\\|\\s*(ba)?sh\\b'))
+        OR upper(q.statement_text) RLIKE '(BASE64|HEX|ENCODE|REVERSE)\\s*\\(\\s*SECRET\\s*\\('
       )
     UNION ALL
     SELECT
       a.event_time                    AS event_time,
       a.user_identity.email           AS actor,
-      a.service_name                  AS surface,
+      CASE WHEN a.action_name = 'commandExecute' THEN 'command_execution_api' ELSE a.service_name END AS surface,
       CASE
-        WHEN upper(a.request_params['commandText']) LIKE '%UNHEX(%'                                          THEN 'UNHEX'
-        WHEN a.request_params['commandText'] LIKE '%xxd%' AND a.request_params['commandText'] LIKE '%-r%'    THEN 'xxd decode'
-        WHEN a.request_params['commandText'] LIKE '%base64%'                                                 THEN 'base64 decode'
-        WHEN a.request_params['commandText'] LIKE '%printf%'                                                 THEN 'printf hex'
+        WHEN a.secret_encode                                                THEN 'secret encode (redaction bypass)'
+        WHEN upper(a.cmd) LIKE '%UNHEX(%'                                   THEN 'UNHEX'
+        WHEN a.cmd LIKE '%xxd%' AND a.cmd LIKE '%-r%'                       THEN 'xxd decode'
+        WHEN a.cmd LIKE '%base64%'                                          THEN 'base64 decode'
+        WHEN a.cmd LIKE '%printf%'                                          THEN 'printf hex'
         ELSE 'encoded payload'
       END                             AS encoding_technique,
       a.source_ip_address             AS source_ip,
-      a.request_params['commandId']   AS statement_id,
-      a.request_params['commandText'] AS statement_text
-    FROM system.access.audit AS a
-    WHERE a.event_time BETWEEN start_time AND end_time
-      AND a.service_name IN ('notebook', 'jobs')
-      AND a.action_name IN ('runCommand', 'submitCommand')
-      AND (
-        upper(a.request_params['commandText']) LIKE '%UNHEX(%'
-        OR (a.request_params['commandText'] LIKE '%xxd%' AND a.request_params['commandText'] LIKE '%-r%')
-        OR (a.request_params['commandText'] LIKE '%base64%' AND a.request_params['commandText'] RLIKE '(--decode|-d)\\b')
-        OR (a.request_params['commandText'] LIKE '%printf%' AND a.request_params['commandText'] RLIKE '[0-9a-fA-F]{20,}'
-            AND (a.request_params['commandText'] LIKE '%xxd%' OR a.request_params['commandText'] RLIKE '\\|\\s*(ba)?sh\\b'))
-      )
+      a.statement_id                  AS statement_id,
+      a.cmd                           AS statement_text
+    FROM (
+      SELECT x.*,
+             COALESCE(x.request_params['commandText'], x.request_params['command']) AS cmd,
+             COALESCE(x.request_params['commandId'], x.request_params['context_id']) AS statement_id,
+             (COALESCE(x.request_params['commandText'], x.request_params['command'])
+                RLIKE '(b(16|32|64|85)encode|a85encode|hexlify|codecs\\.encode)\\s*\\(\\s*dbutils\\.secrets\\.get(Bytes)?\\(|dbutils\\.secrets\\.get(Bytes)?\\([^)]*\\)\\s*(\\.encode\\([^)]*\\))?\\s*\\.(hex|encode)\\(|\\.join\\(\\s*(list\\()?\\s*dbutils\\.secrets\\.get\\(|for\\s+\\w+\\s+in\\s+dbutils\\.secrets\\.get\\('
+              OR (COALESCE(x.request_params['commandText'], x.request_params['command']) LIKE '%dbutils.secrets.list%'
+                  AND COALESCE(x.request_params['commandText'], x.request_params['command']) LIKE '%dbutils.secrets.get%'
+                  AND COALESCE(x.request_params['commandText'], x.request_params['command']) RLIKE '(b(16|32|64|85)encode|a85encode|hexlify|codecs\\.encode|\\.hex\\(\\))')) AS secret_encode
+      FROM system.access.audit AS x
+      WHERE x.event_time BETWEEN start_time AND end_time
+        AND ((x.service_name IN ('notebook', 'jobs') AND x.action_name IN ('runCommand', 'submitCommand'))
+             OR (x.service_name = 'data-plane-router' AND x.action_name = 'commandExecute'))
+    ) AS a
+    WHERE upper(a.cmd) LIKE '%UNHEX(%'
+       OR (a.cmd LIKE '%xxd%' AND a.cmd LIKE '%-r%')
+       OR (a.cmd LIKE '%base64%' AND a.cmd RLIKE '(--decode|-d)\\b')
+       OR (a.cmd LIKE '%printf%' AND a.cmd RLIKE '[0-9a-fA-F]{20,}'
+           AND (a.cmd LIKE '%xxd%' OR a.cmd RLIKE '\\|\\s*(ba)?sh\\b'))
+       OR a.secret_encode
   );
