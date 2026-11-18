@@ -179,6 +179,10 @@ for ex in examples:
         ex["id"] = uuid.uuid4().hex
 examples.sort(key=lambda e: e["id"])  # load-bearing: the API rejects an unsorted list
 space["instructions"]["example_question_sqls"] = examples
+# Also load-bearing: the API rejects a table whose column_configs are not sorted by
+# column_name ("Invalid export proto ... must be sorted by column_name").
+for table in space["data_sources"]["tables"]:
+    table.get("column_configs", []).sort(key=lambda c: c["column_name"])
 
 serialized = json.dumps(space, indent=2)
 print(f"built space payload: {len(examples)} embedded queries, {len(serialized):,} bytes")
