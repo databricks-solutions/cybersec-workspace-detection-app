@@ -852,7 +852,7 @@
           }
         ],
         "usage_guidance": [
-          "A single session id used from more than one public IP or more than one user agent. MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. This is the strongest session signal available in audit data: one session belongs to one browser on one machine, and a legitimate user changing network gets a NEW session rather than carrying the old one. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, same session from different devices, session used from two IPs, hijacked session, session anomaly."
+          "A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly."
         ]
       },
       {
