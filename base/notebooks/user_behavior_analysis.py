@@ -161,9 +161,9 @@ def discover_detections(base_path: str = None) -> Dict[str, Dict]:
 
     print(f"Looking for detection files in {detections_base}")
 
-    # Scan both binary and behavioral subdirectories
+    # Scan both event-based and behavioral subdirectories
     detection_files = []
-    for subdir in ["binary", "behavioral"]:
+    for subdir in ["event-based", "behavioral"]:
         detections_dir = os.path.join(detections_base, subdir)
 
         try:
