@@ -57,22 +57,24 @@
 # COMMAND ----------
 
 @detect(output=Output.asDataFrame)
-def attempted_logon_from_denied_ip(earliest:str = None, latest: str = None, ignore_tokens: bool = True):
+def attempted_logon_from_denied_ip(earliest:str = None, latest: str = None, ignore_tokens: bool = False):
     from pyspark.sql.functions import (col, current_date, date_sub, to_date, current_timestamp, 
                                        expr, unix_timestamp, round, from_unixtime, when, to_timestamp)
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 24 hours")
     latest = latest or current_timestamp()
 
+    # Databricks-internal service clients only (case-sensitive). A bare "databricks"
+    # pattern also dropped databricks-cli, databricks-sdk-*, the Terraform provider and
+    # SAT -- exactly the clients a stolen token or SP secret is used with.
     known_user_agents = [
-        "databricks",
         "Databricks-Service/driver",
         "Databricks-Runtime",
         "Delta-Sharing-SparkStructuredStreaming",
         "RawDBHttpClient",
         "mlflow-python",
         "obsSDK-scala/1.0.0",
-        "wsfs/1.0",
+        "wsfs/",
         "feature-store"
     ]
     known_ua_regex = "|".join(known_user_agents)
@@ -86,15 +88,17 @@ def attempted_logon_from_denied_ip(earliest:str = None, latest: str = None, igno
 
     df = spark.table("system.access.audit")
 
+    # ignore_tokens=True drops every service principal (UUID identity). Off by default:
+    # an SP credential refused by an IP access list is as interesting as a user's.
     if ignore_tokens:
         uuid_pattern = r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-        df = df.filter(~col("user_identity.email").rlike(uuid_pattern))
+        df = df.filter(~F.coalesce(col("user_identity.email"), F.lit("")).rlike(uuid_pattern))
 
     df_filtered = df.filter(
         (col("service_name") == "accounts") &
         (col("action_name").isin("IpAccessDenied")) &
-        (~F.col("user_agent").rlike(known_ua_regex)) &
-        (~col("request_params.path").rlike(excluded_paths_regex)) &
+        (~F.coalesce(F.col("user_agent"), F.lit("")).rlike(known_ua_regex)) &
+        (~F.coalesce(col("request_params.path"), F.lit("")).rlike(excluded_paths_regex)) &
         (col("event_time") >= earliest) & (col("event_time") <= latest)
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
