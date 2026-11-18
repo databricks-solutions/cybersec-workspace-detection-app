@@ -69,7 +69,7 @@ def verbose_audit_disabled(earliest:str = None, latest: str = None):
     # workspaceConfKeys / workspaceConfValues are comma-joined in matching positions when one
     # request changes several settings, so look for the pair anywhere in the list instead of
     # comparing the whole string (which let "...,enableVerboseAuditLogs" / "...,false" through).
-    verbose_value = expr("""filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs')[0].value""")
+    verbose_value = expr("""try_element_at(filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs'), 1).value""")
 
     df_filtered = df.filter(
         (col("action_name").isin("workspaceConfEdit")) &

@@ -235,8 +235,8 @@ COMMENT 'Changes to the enableVerboseAuditLogs workspace setting, both disables 
 RETURN
   SELECT
     a.event_time,
-    filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs')[0].value AS set_to,
-    CASE WHEN lower(COALESCE(filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs')[0].value, '')) = 'false'
+    try_element_at(filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs'), 1).value AS set_to,
+    CASE WHEN lower(COALESCE(try_element_at(filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs'), 1).value, '')) = 'false'
          THEN 'CRITICAL - audit logging disabled, visibility gap starts here'
          ELSE 'INFO - audit logging enabled' END,
     CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,
