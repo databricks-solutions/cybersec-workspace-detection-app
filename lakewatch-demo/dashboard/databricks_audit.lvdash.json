@@ -1,0 +1,1471 @@
+{
+ "datasets": [
+  {
+   "name": "ds_signals",
+   "displayName": "signals",
+   "queryLines": [
+    "WITH anchor AS (SELECT max(event_time) AS t FROM audit),\n",
+    "sig AS (\n",
+    "  SELECT rule, actor, event_time,\n",
+    "         first(stage) AS stage, first(actor_kind) AS actor_kind, first(nullif(src_ip, '')) AS src_ip,\n",
+    "         coalesce(first(actor_name), actor) AS actor_name, first(summary) AS summary\n",
+    "  FROM demo_signals CROSS JOIN anchor\n",
+    "  WHERE created_at >= anchor.t AND event_time >= anchor.t - INTERVAL 1 DAY\n",
+    "  GROUP BY rule, actor, event_time\n",
+    "),\n",
+    "sig_named AS (\n",
+    "  SELECT *, CASE stage WHEN '1' THEN '1 Access' WHEN '2' THEN '2 Discovery' WHEN '3' THEN '3 Secret harvest' WHEN '4' THEN '4 Execution' WHEN '5' THEN '5 Persistence' WHEN '6' THEN '6 Collection and clean-up' WHEN 'corr' THEN 'Correlation' ELSE 'Other' END AS stage_label,\n",
+    "         CASE WHEN startswith(rule, 'ada_') THEN 'Stage rules (ada_)' ELSE 'Single-event rules (adp_)' END AS family\n",
+    "  FROM sig\n",
+    ")\n",
+    "SELECT event_time, rule, family, stage_label AS stage, actor, actor_name, actor_kind,\n",
+    "       coalesce(src_ip, '') AS src_ip, summary,\n",
+    "       CASE WHEN family = 'Stage rules (ada_)' THEN 1 ELSE 0 END AS is_ada,\n",
+    "       CASE WHEN family = 'Single-event rules (adp_)' THEN 1 ELSE 0 END AS is_adp,\n",
+    "       CASE WHEN family = 'Stage rules (ada_)' THEN actor END AS ada_actor\n",
+    "FROM sig_named\n",
+    "ORDER BY event_time\n"
+   ]
+  },
+  {
+   "name": "ds_timeline",
+   "displayName": "timeline",
+   "queryLines": [
+    "WITH anchor AS (SELECT max(event_time) AS t FROM audit),\n",
+    "sig AS (\n",
+    "  SELECT rule, actor, event_time,\n",
+    "         first(stage) AS stage, first(actor_kind) AS actor_kind, first(nullif(src_ip, '')) AS src_ip,\n",
+    "         coalesce(first(actor_name), actor) AS actor_name, first(summary) AS summary\n",
+    "  FROM demo_signals CROSS JOIN anchor\n",
+    "  WHERE created_at >= anchor.t AND event_time >= anchor.t - INTERVAL 1 DAY\n",
+    "  GROUP BY rule, actor, event_time\n",
+    "),\n",
+    "sig_named AS (\n",
+    "  SELECT *, CASE stage WHEN '1' THEN '1 Access' WHEN '2' THEN '2 Discovery' WHEN '3' THEN '3 Secret harvest' WHEN '4' THEN '4 Execution' WHEN '5' THEN '5 Persistence' WHEN '6' THEN '6 Collection and clean-up' WHEN 'corr' THEN 'Correlation' ELSE 'Other' END AS stage_label,\n",
+    "         CASE WHEN startswith(rule, 'ada_') THEN 'Stage rules (ada_)' ELSE 'Single-event rules (adp_)' END AS family\n",
+    "  FROM sig\n",
+    "),\n",
+    "ada AS (SELECT * FROM sig_named WHERE family = 'Stage rules (ada_)'),\n",
+    "shared_ips AS (SELECT src_ip FROM ada WHERE src_ip IS NOT NULL GROUP BY src_ip HAVING count(DISTINCT actor) > 1),\n",
+    "lanes AS (\n",
+    "  SELECT a.actor_name AS lane, 'identity' AS lane_kind, a.event_time, a.stage_label, a.rule, a.src_ip,\n",
+    "         a.actor_name, a.summary, s.src_ip IS NOT NULL AS on_shared_ip\n",
+    "  FROM ada a LEFT JOIN shared_ips s ON s.src_ip = a.src_ip\n",
+    "  UNION ALL\n",
+    "  SELECT concat('IP ', a.src_ip), 'shared IP', a.event_time, a.stage_label, a.rule, a.src_ip, a.actor_name,\n",
+    "         a.summary, true\n",
+    "  FROM ada a JOIN shared_ips s ON s.src_ip = a.src_ip\n",
+    "),\n",
+    "-- Lane order: the identities that share an IP first, then that IP, then the rest by their first signal.\n",
+    "ordered AS (\n",
+    "  SELECT *, min(event_time) OVER (PARTITION BY lane) AS lane_start,\n",
+    "         CASE WHEN lane_kind = 'shared IP' THEN 1\n",
+    "              WHEN max(on_shared_ip) OVER (PARTITION BY lane) THEN 0\n",
+    "              ELSE 2 END AS lane_group\n",
+    "  FROM lanes\n",
+    ")\n",
+    "SELECT lane, lane_kind, event_time, stage_label AS stage, rule, src_ip, actor_name, summary,\n",
+    "       dense_rank() OVER (ORDER BY lane_group, lane_start, lane) AS lane_order\n",
+    "FROM ordered\n",
+    "ORDER BY event_time\n"
+   ]
+  },
+  {
+   "name": "ds_contrast",
+   "displayName": "contrast",
+   "queryLines": [
+    "WITH anchor AS (SELECT max(event_time) AS t FROM audit),\n",
+    "sig AS (\n",
+    "  SELECT rule, actor, event_time,\n",
+    "         first(stage) AS stage, first(actor_kind) AS actor_kind, first(nullif(src_ip, '')) AS src_ip,\n",
+    "         coalesce(first(actor_name), actor) AS actor_name, first(summary) AS summary\n",
+    "  FROM demo_signals CROSS JOIN anchor\n",
+    "  WHERE created_at >= anchor.t AND event_time >= anchor.t - INTERVAL 1 DAY\n",
+    "  GROUP BY rule, actor, event_time\n",
+    "),\n",
+    "sig_named AS (\n",
+    "  SELECT *, CASE stage WHEN '1' THEN '1 Access' WHEN '2' THEN '2 Discovery' WHEN '3' THEN '3 Secret harvest' WHEN '4' THEN '4 Execution' WHEN '5' THEN '5 Persistence' WHEN '6' THEN '6 Collection and clean-up' WHEN 'corr' THEN 'Correlation' ELSE 'Other' END AS stage_label,\n",
+    "         CASE WHEN startswith(rule, 'ada_') THEN 'Stage rules (ada_)' ELSE 'Single-event rules (adp_)' END AS family\n",
+    "  FROM sig\n",
+    "),\n",
+    "grps AS (\n",
+    "  SELECT * FROM VALUES\n",
+    "    (1, 'S1 attack: Maria Lopez', 'Maria Lopez'),\n",
+    "    (2, 'S1 attack: sp-etl-prod', 'sp-etl-prod'),\n",
+    "    (3, 'S2 attack: sp-reporting', 'sp-reporting'),\n",
+    "    (4, 'S3 attack: Tom Becker', 'Tom Becker'),\n",
+    "    (5, 'S4 attack: sp-ml-batch', 'sp-ml-batch'),\n",
+    "    (6, 'D1 decoy: sp-ci-deploy', 'sp-ci-deploy'),\n",
+    "    (7, 'D2 decoy: Ana Silva', 'Ana Silva'),\n",
+    "    (8, 'Background (all other identities)', CAST(NULL AS STRING))\n",
+    "  AS g(ord, grp, display_name)\n",
+    "),\n",
+    "members AS (SELECT g.ord, p.email FROM grps g JOIN principals p ON p.display_name = g.display_name),\n",
+    "fired AS (SELECT DISTINCT s.rule, trim(a) AS actor FROM sig_named s LATERAL VIEW explode(split(s.actor, ',')) x AS a),\n",
+    "hits AS (\n",
+    "  SELECT DISTINCT coalesce(m.ord, 8) AS ord, f.rule\n",
+    "  FROM fired f LEFT JOIN members m ON m.email = f.actor\n",
+    "),\n",
+    "fam AS (SELECT * FROM VALUES ('Stage rules (ada_)', 'ada_'), ('Single-event rules (adp_)', 'adp_') AS f(family, prefix))\n",
+    "SELECT g.ord, g.grp, f.family, count(h.rule) AS rules\n",
+    "FROM grps g CROSS JOIN fam f LEFT JOIN hits h ON h.ord = g.ord AND startswith(h.rule, f.prefix)\n",
+    "GROUP BY g.ord, g.grp, f.family\n",
+    "ORDER BY g.ord, f.family\n"
+   ]
+  },
+  {
+   "name": "ds_actions",
+   "displayName": "actions",
+   "queryLines": [
+    "WITH base AS (\n",
+    "  SELECT a.event_time, a.user_identity.email AS actor,\n",
+    "         coalesce(p.display_name, a.user_identity.email) AS actor_name, a.source_ip_address AS src_ip,\n",
+    "         a.service_name, a.action_name, a.response.status_code AS status, a.user_agent, a.request_params\n",
+    "  FROM audit a LEFT JOIN principals p ON p.email = a.user_identity.email\n",
+    "  WHERE a.event_time >= (SELECT max(event_time) FROM audit) - INTERVAL 24 HOURS\n",
+    ")\n",
+    "SELECT event_time, actor, actor_name, src_ip, service_name, action_name, status, user_agent,\n",
+    "       to_json(request_params) AS request_params,\n",
+    "       timestamp_seconds(floor(unix_timestamp(event_time) / 600) * 600) AS ten_minutes\n",
+    "FROM base\n",
+    "WHERE (:actor = 'All' OR actor_name = :actor) AND (:ip = 'All' OR src_ip = :ip)\n",
+    "ORDER BY event_time DESC\n",
+    "LIMIT 20000\n"
+   ],
+   "parameters": [
+    {
+     "displayName": "Identity",
+     "keyword": "actor",
+     "dataType": "STRING",
+     "defaultSelection": {
+      "values": {
+       "dataType": "STRING",
+       "values": [
+        {
+         "value": "Maria Lopez"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "displayName": "Source IP",
+     "keyword": "ip",
+     "dataType": "STRING",
+     "defaultSelection": {
+      "values": {
+       "dataType": "STRING",
+       "values": [
+        {
+         "value": "All"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "ds_identities",
+   "displayName": "identities",
+   "queryLines": [
+    "WITH base AS (\n",
+    "  SELECT a.event_time, a.user_identity.email AS actor,\n",
+    "         coalesce(p.display_name, a.user_identity.email) AS actor_name, a.source_ip_address AS src_ip,\n",
+    "         a.service_name, a.action_name, a.response.status_code AS status, a.user_agent, a.request_params\n",
+    "  FROM audit a LEFT JOIN principals p ON p.email = a.user_identity.email\n",
+    "  WHERE a.event_time >= (SELECT max(event_time) FROM audit) - INTERVAL 24 HOURS\n",
+    ")\n",
+    "SELECT identity FROM (\n",
+    "  SELECT 'All' AS identity, 0 AS o\n",
+    "  UNION ALL\n",
+    "  SELECT DISTINCT actor_name, 1 FROM base WHERE actor_name IS NOT NULL\n",
+    ")\n",
+    "ORDER BY o, identity\n"
+   ]
+  },
+  {
+   "name": "ds_ips",
+   "displayName": "ips",
+   "queryLines": [
+    "WITH base AS (\n",
+    "  SELECT a.event_time, a.user_identity.email AS actor,\n",
+    "         coalesce(p.display_name, a.user_identity.email) AS actor_name, a.source_ip_address AS src_ip,\n",
+    "         a.service_name, a.action_name, a.response.status_code AS status, a.user_agent, a.request_params\n",
+    "  FROM audit a LEFT JOIN principals p ON p.email = a.user_identity.email\n",
+    "  WHERE a.event_time >= (SELECT max(event_time) FROM audit) - INTERVAL 24 HOURS\n",
+    ")\n",
+    "SELECT ip FROM (\n",
+    "  SELECT 'All' AS ip, 0 AS o\n",
+    "  UNION ALL\n",
+    "  SELECT DISTINCT src_ip, 1 FROM base WHERE src_ip IS NOT NULL\n",
+    ")\n",
+    "ORDER BY o, ip\n"
+   ]
+  },
+  {
+   "name": "ds_actor_signals",
+   "displayName": "actor_signals",
+   "queryLines": [
+    "WITH anchor AS (SELECT max(event_time) AS t FROM audit),\n",
+    "sig AS (\n",
+    "  SELECT rule, actor, event_time,\n",
+    "         first(stage) AS stage, first(actor_kind) AS actor_kind, first(nullif(src_ip, '')) AS src_ip,\n",
+    "         coalesce(first(actor_name), actor) AS actor_name, first(summary) AS summary\n",
+    "  FROM demo_signals CROSS JOIN anchor\n",
+    "  WHERE created_at >= anchor.t AND event_time >= anchor.t - INTERVAL 1 DAY\n",
+    "  GROUP BY rule, actor, event_time\n",
+    "),\n",
+    "sig_named AS (\n",
+    "  SELECT *, CASE stage WHEN '1' THEN '1 Access' WHEN '2' THEN '2 Discovery' WHEN '3' THEN '3 Secret harvest' WHEN '4' THEN '4 Execution' WHEN '5' THEN '5 Persistence' WHEN '6' THEN '6 Collection and clean-up' WHEN 'corr' THEN 'Correlation' ELSE 'Other' END AS stage_label,\n",
+    "         CASE WHEN startswith(rule, 'ada_') THEN 'Stage rules (ada_)' ELSE 'Single-event rules (adp_)' END AS family\n",
+    "  FROM sig\n",
+    ")\n",
+    "SELECT event_time, rule, stage_label AS stage, actor_name, coalesce(src_ip, '') AS src_ip, summary\n",
+    "FROM sig_named\n",
+    "WHERE (:actor = 'All' OR actor_name = :actor) AND (:ip = 'All' OR src_ip = :ip)\n",
+    "ORDER BY event_time\n"
+   ],
+   "parameters": [
+    {
+     "displayName": "Identity",
+     "keyword": "actor",
+     "dataType": "STRING",
+     "defaultSelection": {
+      "values": {
+       "dataType": "STRING",
+       "values": [
+        {
+         "value": "Maria Lopez"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "displayName": "Source IP",
+     "keyword": "ip",
+     "dataType": "STRING",
+     "defaultSelection": {
+      "values": {
+       "dataType": "STRING",
+       "values": [
+        {
+         "value": "All"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "ds_h6b_chain",
+   "displayName": "h6b_chain",
+   "queryLines": [
+    "SELECT chain, src_ip, reader_name, first_read_at, last_read_at, array_join(secrets_read, ', ') AS secrets_read,\n",
+    "       denied_reads, sp_name, sp_auth_at, sp_user_agent, first_priv_at, last_priv_at,\n",
+    "       array_join(sp_actions, ', ') AS sp_actions\n",
+    "FROM (\n",
+    "WITH ev AS (\n",
+    "  SELECT event_time, user_identity.email AS actor, source_ip_address AS src_ip, user_agent, action_name,\n",
+    "         request_params.scope AS scope, request_params.key AS key, response.status_code AS status,\n",
+    "         CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'\n",
+    "                OR identity_metadata.acting_resource_type ILIKE '%service principal%'\n",
+    "              THEN 'sp' ELSE 'user' END AS actor_kind\n",
+    "  FROM audit\n",
+    "  WHERE event_time >= (SELECT max(event_time) FROM audit)\n",
+    "                      - INTERVAL 24 HOURS\n",
+    "    AND source_ip_address IS NOT NULL\n",
+    "    AND action_name IN ('getSecret', 'tokenLogin', 'oidcTokenAuthorization',\n",
+    "                        'createFunction', 'addPrincipalToGroup', 'generateDbToken', 'workspaceExport')\n",
+    ")\n",
+    "SELECT concat(pr.display_name, ' -> ', ps.display_name) AS chain, m.src_ip, m.readers[0] AS reader, pr.display_name AS reader_name, m.first_read_at, m.last_read_at,\n",
+    "       m.secrets_read, m.denied_reads, m.sp, ps.display_name AS sp_name, m.sp_auth_at, m.sp_user_agent,\n",
+    "       m.first_priv_at, m.last_priv_at, m.sp_actions\n",
+    "FROM ev\n",
+    "MATCH_RECOGNIZE (\n",
+    "  PARTITION BY src_ip\n",
+    "  ORDER BY event_time\n",
+    "  MEASURES collect_set(get_secret.actor) AS readers,\n",
+    "           FIRST(get_secret.event_time) AS first_read_at,\n",
+    "           LAST(get_secret.event_time) AS last_read_at,\n",
+    "           collect_set(concat(get_secret.scope, '/', get_secret.key)) AS secrets_read,\n",
+    "           count_if(get_secret.status <> 200) AS denied_reads,\n",
+    "           FIRST(sp_auth.actor) AS sp,\n",
+    "           FIRST(sp_auth.event_time) AS sp_auth_at,\n",
+    "           FIRST(sp_auth.user_agent) AS sp_user_agent,\n",
+    "           FIRST(sp_priv.event_time) AS first_priv_at,\n",
+    "           LAST(sp_priv.event_time) AS last_priv_at,\n",
+    "           collect_list(sp_priv.action_name) AS sp_actions\n",
+    "  ONE ROW PER MATCH\n",
+    "  AFTER MATCH SKIP PAST LAST ROW\n",
+    "  PATTERN (get_secret+ other*? sp_auth sp_priv+)\n",
+    "  DEFINE get_secret AS action_name = 'getSecret',\n",
+    "         other      AS action_name <> 'getSecret'\n",
+    "                       AND NOT (actor_kind = 'sp' AND action_name IN ('tokenLogin', 'oidcTokenAuthorization')),\n",
+    "         sp_auth    AS action_name IN ('tokenLogin', 'oidcTokenAuthorization') AND status = 200\n",
+    "                       AND actor_kind = 'sp' AND actor <> LAST(get_secret.actor)\n",
+    "                       AND event_time <= LAST(get_secret.event_time) + INTERVAL 6 HOURS,\n",
+    "         sp_priv    AS action_name IN ('createFunction', 'addPrincipalToGroup', 'generateDbToken', 'workspaceExport')\n",
+    "                       AND actor = FIRST(sp_auth.actor)\n",
+    ") AS m\n",
+    "LEFT JOIN principals AS pr ON pr.email = m.readers[0]\n",
+    "LEFT JOIN principals AS ps ON ps.email = m.sp\n",
+    "ORDER BY m.first_read_at\n",
+    ") AS h6b\n",
+    "WHERE (:actor = 'All' OR :actor IN (reader_name, sp_name)) AND (:ip = 'All' OR src_ip = :ip)\n",
+    "ORDER BY first_read_at\n"
+   ],
+   "parameters": [
+    {
+     "displayName": "Identity",
+     "keyword": "actor",
+     "dataType": "STRING",
+     "defaultSelection": {
+      "values": {
+       "dataType": "STRING",
+       "values": [
+        {
+         "value": "Maria Lopez"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "displayName": "Source IP",
+     "keyword": "ip",
+     "dataType": "STRING",
+     "defaultSelection": {
+      "values": {
+       "dataType": "STRING",
+       "values": [
+        {
+         "value": "All"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "pages": [
+  {
+   "name": "overview",
+   "displayName": "Attack overview",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "title",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Databricks audit demo: one leaked token, two identities\n",
+        "\n",
+        "An attacker uses a leaked personal access token (PAT) of a data engineer, reads the secret of a service principal, and continues as that service principal from the same IP. The data is a synthetic copy of `system.access.audit`; the signals are from the last reset of the demo."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi_ada",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_signals",
+         "fields": [
+          {
+           "name": "sum(is_ada)",
+           "expression": "SUM(`is_ada`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "sum(is_ada)",
+         "displayName": "Signals from stage rules (ada_)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Signals from stage rules (ada_)",
+        "showDescription": true,
+        "description": "Rules that look for one step of an attack, or for a chain of steps"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 2,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi_adp",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_signals",
+         "fields": [
+          {
+           "name": "sum(is_adp)",
+           "expression": "SUM(`is_adp`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "sum(is_adp)",
+         "displayName": "Signals from single-event rules (adp_)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Signals from single-event rules (adp_)",
+        "showDescription": true,
+        "description": "Rules from the detection pack. They also fire on normal work"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 2,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi_ids",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_signals",
+         "fields": [
+          {
+           "name": "countdistinct(ada_actor)",
+           "expression": "COUNT(DISTINCT `ada_actor`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "countdistinct(ada_actor)",
+         "displayName": "Identities with stage-rule signals"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Identities with stage-rule signals"
+       }
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 2,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "incident_timeline",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_timeline",
+         "fields": [
+          {
+           "name": "lane",
+           "expression": "`lane`"
+          },
+          {
+           "name": "lane_kind",
+           "expression": "`lane_kind`"
+          },
+          {
+           "name": "event_time",
+           "expression": "`event_time`"
+          },
+          {
+           "name": "stage",
+           "expression": "`stage`"
+          },
+          {
+           "name": "rule",
+           "expression": "`rule`"
+          },
+          {
+           "name": "src_ip",
+           "expression": "`src_ip`"
+          },
+          {
+           "name": "actor_name",
+           "expression": "`actor_name`"
+          },
+          {
+           "name": "summary",
+           "expression": "`summary`"
+          },
+          {
+           "name": "lane_order",
+           "expression": "`lane_order`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "custom-vega-viz",
+       "jsonSpec": {
+        "type": "vega-lite",
+        "spec": "{\"$schema\": \"https://vega.github.io/schema/vega-lite/v5.json\", \"width\": \"container\", \"height\": \"container\", \"config\": {\"autosize\": {\"type\": \"fit\", \"contains\": \"padding\"}}, \"data\": {\"name\": \"databricks_query\"}, \"mark\": {\"type\": \"point\", \"filled\": true, \"size\": 180, \"opacity\": 0.9, \"stroke\": \"#11171C\", \"strokeWidth\": 0.5}, \"encoding\": {\"x\": {\"field\": \"event_time\", \"type\": \"temporal\", \"title\": null, \"scale\": {\"padding\": 16}, \"axis\": {\"format\": \"%H:%M\", \"labelAngle\": 0}}, \"y\": {\"field\": \"lane\", \"type\": \"nominal\", \"title\": null, \"sort\": {\"field\": \"lane_order\", \"op\": \"min\"}}, \"color\": {\"field\": \"stage\", \"type\": \"nominal\", \"title\": \"Stage\", \"scale\": {\"domain\": [\"1 Access\", \"2 Discovery\", \"3 Secret harvest\", \"4 Execution\", \"5 Persistence\", \"6 Collection and clean-up\", \"Correlation\"], \"range\": [\"#0072B2\", \"#56B4E9\", \"#E69F00\", \"#CC79A7\", \"#D55E00\", \"#009E73\", \"#5B3A8C\"]}}, \"shape\": {\"field\": \"lane_kind\", \"type\": \"nominal\", \"title\": \"Lane\", \"scale\": {\"domain\": [\"identity\", \"shared IP\"], \"range\": [\"circle\", \"diamond\"]}}, \"tooltip\": [{\"field\": \"rule\", \"title\": \"Rule\"}, {\"field\": \"stage\", \"title\": \"Stage\"}, {\"field\": \"actor_name\", \"title\": \"Identity\"}, {\"field\": \"src_ip\", \"title\": \"Source IP\"}, {\"field\": \"event_time\", \"type\": \"temporal\", \"format\": \"%b %d %H:%M:%S\", \"title\": \"Time\"}, {\"field\": \"summary\", \"title\": \"Summary\"}]}}"
+       },
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "lane"
+         },
+         {
+          "fieldName": "lane_kind"
+         },
+         {
+          "fieldName": "event_time"
+         },
+         {
+          "fieldName": "stage"
+         },
+         {
+          "fieldName": "rule"
+         },
+         {
+          "fieldName": "src_ip"
+         },
+         {
+          "fieldName": "actor_name"
+         },
+         {
+          "fieldName": "summary"
+         },
+         {
+          "fieldName": "lane_order"
+         }
+        ]
+       },
+       "data": {
+        "queryName": "main_query"
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Incident timeline",
+        "showDescription": true,
+        "description": "One row per identity; a diamond row is an IP that two or more identities used. Color = attack stage. Times are in your browser's time zone"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 5,
+      "width": 12,
+      "height": 7
+     }
+    },
+    {
+     "widget": {
+      "name": "signals_per_stage",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_signals",
+         "disaggregated": false,
+         "fields": [
+          {
+           "name": "stage",
+           "expression": "`stage`"
+          },
+          {
+           "name": "family",
+           "expression": "`family`"
+          },
+          {
+           "name": "count(*)",
+           "expression": "COUNT(`*`)"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "stage",
+         "displayName": "Stage",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "custom-order",
+           "orderedValues": [
+            "1 Access",
+            "2 Discovery",
+            "3 Secret harvest",
+            "4 Execution",
+            "5 Persistence",
+            "6 Collection and clean-up",
+            "Correlation"
+           ]
+          }
+         }
+        },
+        "y": {
+         "fieldName": "count(*)",
+         "displayName": "Signals",
+         "scale": {
+          "type": "quantitative"
+         }
+        },
+        "color": {
+         "fieldName": "family",
+         "displayName": "Rule type",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Stage rules (ada_)",
+            "color": "#D55E00"
+           },
+           {
+            "value": "Single-event rules (adp_)",
+            "color": "#8A939B"
+           }
+          ]
+         }
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Signals per stage",
+        "showDescription": true,
+        "description": "Stage rules find one step of the attack; correlation rules join several steps"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 12,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "decoy_contrast",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_contrast",
+         "disaggregated": false,
+         "fields": [
+          {
+           "name": "grp",
+           "expression": "`grp`"
+          },
+          {
+           "name": "family",
+           "expression": "`family`"
+          },
+          {
+           "name": "sum(rules)",
+           "expression": "SUM(`rules`)"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "sum(rules)",
+         "displayName": "Rules that fired",
+         "scale": {
+          "type": "quantitative"
+         }
+        },
+        "y": {
+         "fieldName": "grp",
+         "displayName": "Identity",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "custom-order",
+           "orderedValues": [
+            "S1 attack: Maria Lopez",
+            "S1 attack: sp-etl-prod",
+            "S2 attack: sp-reporting",
+            "S3 attack: Tom Becker",
+            "S4 attack: sp-ml-batch",
+            "D1 decoy: sp-ci-deploy",
+            "D2 decoy: Ana Silva",
+            "Background (all other identities)"
+           ]
+          }
+         }
+        },
+        "color": {
+         "fieldName": "family",
+         "displayName": "Rule type",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Stage rules (ada_)",
+            "color": "#D55E00"
+           },
+           {
+            "value": "Single-event rules (adp_)",
+            "color": "#8A939B"
+           }
+          ]
+         }
+        }
+       },
+       "mark": {
+        "layout": "group"
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Decoys: single-event rules fire, stage rules do not",
+        "showDescription": true,
+        "description": "Number of different rules with a signal. Decoys and normal work fire adp_ rules, but only the attacks fire ada_ rules"
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 12,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "reading",
+      "multilineTextboxSpec": {
+       "lines": [
+        "**How to read this page.** Start with the top rows of the timeline: the PAT of Maria Lopez logs in from a new IP, lists resources and reads secrets. Then sp-etl-prod logs in from **the same IP** and creates functions, adds an admin, makes a token and exports a notebook. Each step alone looks like normal work; the order and the shared IP make it an attack. Open the **Investigate** page to see every action."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 18,
+      "width": 12,
+      "height": 2
+     }
+    }
+   ]
+  },
+  {
+   "name": "investigate",
+   "displayName": "Investigate",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "title_2",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Investigate an identity or an IP\n",
+        "\n",
+        "Pick an identity or a source IP. The tables show the actions of the last 24 hours of the audit table and the signals of the last reset."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter_actor",
+      "queries": [
+       {
+        "name": "q_values",
+        "query": {
+         "datasetName": "ds_identities",
+         "fields": [
+          {
+           "name": "identity",
+           "expression": "`identity`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "q_ds_actions",
+        "query": {
+         "datasetName": "ds_actions",
+         "parameters": [
+          {
+           "name": "actor",
+           "keyword": "actor"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "q_ds_actor_signals",
+        "query": {
+         "datasetName": "ds_actor_signals",
+         "parameters": [
+          {
+           "name": "actor",
+           "keyword": "actor"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "q_ds_h6b_chain",
+        "query": {
+         "datasetName": "ds_h6b_chain",
+         "parameters": [
+          {
+           "name": "actor",
+           "keyword": "actor"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-single-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "identity",
+          "displayName": "Identity",
+          "queryName": "q_values"
+         },
+         {
+          "parameterName": "actor",
+          "queryName": "q_ds_actions"
+         },
+         {
+          "parameterName": "actor",
+          "queryName": "q_ds_actor_signals"
+         },
+         {
+          "parameterName": "actor",
+          "queryName": "q_ds_h6b_chain"
+         }
+        ]
+       },
+       "selection": {
+        "defaultSelection": {
+         "values": {
+          "dataType": "STRING",
+          "values": [
+           {
+            "value": "Maria Lopez"
+           }
+          ]
+         }
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Identity"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 2,
+      "width": 4,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter_ip",
+      "queries": [
+       {
+        "name": "q_values",
+        "query": {
+         "datasetName": "ds_ips",
+         "fields": [
+          {
+           "name": "ip",
+           "expression": "`ip`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "q_ds_actions",
+        "query": {
+         "datasetName": "ds_actions",
+         "parameters": [
+          {
+           "name": "ip",
+           "keyword": "ip"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "q_ds_actor_signals",
+        "query": {
+         "datasetName": "ds_actor_signals",
+         "parameters": [
+          {
+           "name": "ip",
+           "keyword": "ip"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "q_ds_h6b_chain",
+        "query": {
+         "datasetName": "ds_h6b_chain",
+         "parameters": [
+          {
+           "name": "ip",
+           "keyword": "ip"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-single-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "ip",
+          "displayName": "Source IP",
+          "queryName": "q_values"
+         },
+         {
+          "parameterName": "ip",
+          "queryName": "q_ds_actions"
+         },
+         {
+          "parameterName": "ip",
+          "queryName": "q_ds_actor_signals"
+         },
+         {
+          "parameterName": "ip",
+          "queryName": "q_ds_h6b_chain"
+         }
+        ]
+       },
+       "selection": {
+        "defaultSelection": {
+         "values": {
+          "dataType": "STRING",
+          "values": [
+           {
+            "value": "All"
+           }
+          ]
+         }
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Source IP"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 2,
+      "width": 4,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "hint",
+      "multilineTextboxSpec": {
+       "lines": [
+        "Tip: set Identity to **All** and pick the attacker IP to see **both** identities that used it."
+       ]
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 2,
+      "width": 4,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "h6b",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_h6b_chain",
+         "fields": [
+          {
+           "name": "chain",
+           "expression": "`chain`"
+          },
+          {
+           "name": "src_ip",
+           "expression": "`src_ip`"
+          },
+          {
+           "name": "first_read_at",
+           "expression": "`first_read_at`"
+          },
+          {
+           "name": "last_read_at",
+           "expression": "`last_read_at`"
+          },
+          {
+           "name": "secrets_read",
+           "expression": "`secrets_read`"
+          },
+          {
+           "name": "denied_reads",
+           "expression": "`denied_reads`"
+          },
+          {
+           "name": "sp_auth_at",
+           "expression": "`sp_auth_at`"
+          },
+          {
+           "name": "sp_user_agent",
+           "expression": "`sp_user_agent`"
+          },
+          {
+           "name": "first_priv_at",
+           "expression": "`first_priv_at`"
+          },
+          {
+           "name": "last_priv_at",
+           "expression": "`last_priv_at`"
+          },
+          {
+           "name": "sp_actions",
+           "expression": "`sp_actions`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "chain",
+          "displayName": "Chain"
+         },
+         {
+          "fieldName": "src_ip",
+          "displayName": "Source IP"
+         },
+         {
+          "fieldName": "first_read_at",
+          "displayName": "First secret read"
+         },
+         {
+          "fieldName": "last_read_at",
+          "displayName": "Last secret read"
+         },
+         {
+          "fieldName": "secrets_read",
+          "displayName": "Secrets read"
+         },
+         {
+          "fieldName": "denied_reads",
+          "displayName": "Denied reads"
+         },
+         {
+          "fieldName": "sp_auth_at",
+          "displayName": "SP login"
+         },
+         {
+          "fieldName": "sp_user_agent",
+          "displayName": "SP user agent"
+         },
+         {
+          "fieldName": "first_priv_at",
+          "displayName": "First SP action"
+         },
+         {
+          "fieldName": "last_priv_at",
+          "displayName": "Last SP action"
+         },
+         {
+          "fieldName": "sp_actions",
+          "displayName": "SP actions"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Hunt 6b: secret reads, then a different service principal on the same IP",
+        "showDescription": true,
+        "description": "MATCH_RECOGNIZE over the audit rows of each IP, sorted by time (hunts/h6_staged_intrusion.sql)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 4,
+      "width": 12,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "actions_over_time",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_actions",
+         "disaggregated": false,
+         "fields": [
+          {
+           "name": "ten_minutes",
+           "expression": "`ten_minutes`"
+          },
+          {
+           "name": "src_ip",
+           "expression": "`src_ip`"
+          },
+          {
+           "name": "count(*)",
+           "expression": "COUNT(`*`)"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "ten_minutes",
+         "displayName": "Time (10 minutes)",
+         "scale": {
+          "type": "temporal"
+         }
+        },
+        "y": {
+         "fieldName": "count(*)",
+         "displayName": "Actions",
+         "scale": {
+          "type": "quantitative"
+         }
+        },
+        "color": {
+         "fieldName": "src_ip",
+         "displayName": "Source IP",
+         "scale": {
+          "type": "categorical"
+         }
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Actions per 10 minutes, by source IP",
+        "showDescription": true,
+        "description": "A new IP with a burst of actions is the attacker"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 8,
+      "width": 12,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "actor_signals",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_actor_signals",
+         "fields": [
+          {
+           "name": "event_time",
+           "expression": "`event_time`"
+          },
+          {
+           "name": "rule",
+           "expression": "`rule`"
+          },
+          {
+           "name": "stage",
+           "expression": "`stage`"
+          },
+          {
+           "name": "actor_name",
+           "expression": "`actor_name`"
+          },
+          {
+           "name": "src_ip",
+           "expression": "`src_ip`"
+          },
+          {
+           "name": "summary",
+           "expression": "`summary`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "event_time",
+          "displayName": "Time"
+         },
+         {
+          "fieldName": "rule",
+          "displayName": "Rule"
+         },
+         {
+          "fieldName": "stage",
+          "displayName": "Stage"
+         },
+         {
+          "fieldName": "actor_name",
+          "displayName": "Identity"
+         },
+         {
+          "fieldName": "src_ip",
+          "displayName": "Source IP"
+         },
+         {
+          "fieldName": "summary",
+          "displayName": "Summary"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Signals"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 13,
+      "width": 12,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "actor_actions",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_actions",
+         "fields": [
+          {
+           "name": "event_time",
+           "expression": "`event_time`"
+          },
+          {
+           "name": "actor_name",
+           "expression": "`actor_name`"
+          },
+          {
+           "name": "src_ip",
+           "expression": "`src_ip`"
+          },
+          {
+           "name": "service_name",
+           "expression": "`service_name`"
+          },
+          {
+           "name": "action_name",
+           "expression": "`action_name`"
+          },
+          {
+           "name": "status",
+           "expression": "`status`"
+          },
+          {
+           "name": "user_agent",
+           "expression": "`user_agent`"
+          },
+          {
+           "name": "request_params",
+           "expression": "`request_params`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "event_time",
+          "displayName": "Time"
+         },
+         {
+          "fieldName": "actor_name",
+          "displayName": "Identity"
+         },
+         {
+          "fieldName": "src_ip",
+          "displayName": "Source IP"
+         },
+         {
+          "fieldName": "service_name",
+          "displayName": "Service"
+         },
+         {
+          "fieldName": "action_name",
+          "displayName": "Action"
+         },
+         {
+          "fieldName": "status",
+          "displayName": "Status"
+         },
+         {
+          "fieldName": "user_agent",
+          "displayName": "User agent"
+         },
+         {
+          "fieldName": "request_params",
+          "displayName": "Request parameters"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Actions",
+        "showDescription": true,
+        "description": "Newest first, at most 20,000 rows"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 18,
+      "width": 12,
+      "height": 8
+     }
+    }
+   ]
+  }
+ ],
+ "uiSettings": {
+  "theme": {
+   "canvasBackgroundColor": {
+    "light": "#FCFCFC",
+    "dark": "#1F272D"
+   },
+   "widgetBackgroundColor": {
+    "light": "#FFFFFF",
+    "dark": "#11171C"
+   },
+   "widgetBorderColor": {
+    "light": "#FFFFFF",
+    "dark": "#11171C"
+   },
+   "fontColor": {
+    "light": "#11171C",
+    "dark": "#E8ECF0"
+   },
+   "selectionColor": {
+    "light": "#2272B4",
+    "dark": "#8ACAFF"
+   },
+   "visualizationColors": [
+    "#0072B2",
+    "#E69F00",
+    "#009E73",
+    "#CC79A7",
+    "#56B4E9",
+    "#D55E00",
+    "#5B3A8C"
+   ],
+   "widgetHeaderAlignment": "LEFT"
+  }
+ }
+}

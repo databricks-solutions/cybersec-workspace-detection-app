@@ -1,0 +1,98 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_identity_pivot_chain
+description: Stage signals of two different identities share a source IP within 4 hours, and one of them is stage 3 or higher.
+severity: Critical
+category: Behavioral
+fidelity: FIDELITY_HIGH
+objective: >-
+  Correlation over the signals of the stage rules. An attacker who reads a service principal
+  secret with a stolen user token then acts as the service principal. The audit log does not
+  record which secret holds which credential, but the attacker uses the same machine, so the two
+  identities share a source IP. The rule reads the signals of the ada_ stage rules of this schema
+  in the run window (the ported adp_ rules are single-event noise and are not read), drops the
+  identical signals of repeated runs, and matches two signals with the same source IP, different
+  identities, at most 4 hours apart, where one of them is stage 3 (credential access) or higher.
+  One finding per source IP and identity pair: actor_a is the identity with the earlier signal,
+  actor_b the identity the attacker moved to. False positives: two people behind one NAT or VPN
+  egress IP who both trigger stage rules; check the user agents and the times.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+  - https://attack.mitre.org/techniques/T1552/
+mitre:
+  - {taxonomy: Enterprise, tactic: Privilege Escalation, technique_id: T1078, technique: Valid Accounts,
+     sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+  - {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1552, technique: Unsecured Credentials}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      -- The stage signals of this schema; DISTINCT drops the identical signals of repeated runs.
+      -- Only signals created in the last 90 minutes: the signals of earlier shows stay in the table, and
+      -- a reset's long lookback would find their pivot again. A reset runs this rule minutes after the
+      -- stage signals; 90 minutes covers the hourly schedule plus slack.
+      WITH sig AS (
+        FROM `{{catalog}}`.`__lakewatch`.`signals`
+        |> WHERE IN_TIMERANGE(event_time) AND created_at >= TIMERANGE_NOW() - INTERVAL 90 MINUTES
+             AND startswith(rule_name, '{{catalog}}.{{schema}}.ada_')
+             AND rule_name NOT IN ('{{catalog}}.{{schema}}.ada_identity_pivot_chain',
+                                   '{{catalog}}.{{schema}}.ada_multi_stage_identity')
+        |> SELECT DISTINCT regexp_extract(rule_name, '([^.]+)$', 1) AS rule,
+                  get_json_object(context, '$.actor') AS actor,
+                  get_json_object(context, '$.actor_kind') AS actor_kind,
+                  get_json_object(context, '$.src_ip') AS src_ip,
+                  get_json_object(context, '$.stage') AS stage,
+                  event_time
+        |> WHERE actor IS NOT NULL AND actor <> ''
+             AND src_ip IS NOT NULL AND src_ip NOT IN ('', 'null')
+             AND try_cast(stage AS INT) BETWEEN 1 AND 6
+      ),
+      -- Each unordered identity pair once (x.actor < y.actor).
+      pairs AS (
+        FROM sig AS x
+        |> JOIN sig AS y
+             ON y.src_ip = x.src_ip AND x.actor < y.actor
+            AND abs(unix_timestamp(y.event_time) - unix_timestamp(x.event_time)) <= 4 * 3600
+            AND greatest(try_cast(x.stage AS INT), try_cast(y.stage AS INT)) >= 3
+        |> AGGREGATE min(x.event_time) AS x_first, min(y.event_time) AS y_first,
+                     max(x.actor_kind) AS x_kind, max(y.actor_kind) AS y_kind,
+                     max(greatest(x.event_time, y.event_time)) AS time,
+                     array_sort(array_distinct(concat(collect_set(x.rule), collect_set(y.rule)))) AS rule_list,
+                     array_sort(array_distinct(concat(collect_set(x.stage), collect_set(y.stage)))) AS stage_list
+             GROUP BY x.src_ip AS src_ip, x.actor AS x_actor, y.actor AS y_actor
+      )
+      FROM pairs
+      |> EXTEND x_first <= y_first AS x_is_a
+      |> SELECT time, src_ip,
+                IF(x_is_a, x_actor, y_actor) AS actor_a,
+                IF(x_is_a, y_actor, x_actor) AS actor_b,
+                IF(x_is_a, y_actor, x_actor) AS actor,
+                IF(x_is_a, y_kind, x_kind) AS actor_kind,
+                least(x_first, y_first) AS first_time,
+                concat(IF(x_is_a, x_actor, y_actor), ', ', IF(x_is_a, y_actor, x_actor)) AS actors,
+                array_join(rule_list, ', ') AS rules,
+                array_join(stage_list, ', ') AS stages
+output:
+  summary: 'One intrusion, two identities: {actor_a} → {actor_b} via {src_ip}'
+  event_time_column: time
+  context:
+    actor: '{actor_b}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: 'corr'
+    actor_a: '{actor_a}'
+    actors: '{actors}'
+    rules: '{rules}'
+    stages: '{stages}'
+  default_context: false
+timerange:
+  # Signals arrive up to one schedule interval after their event time, and a pair spans up to 4 hours.
+  extend_lookback: 8h
+runbook: |
+  1. Open the signals of both identities (demo_signals view) and order them by time.
+  2. Check the user agents and the IP: one attacker machine, or a shared NAT or VPN egress IP?
+  3. If one attacker: revoke the user's tokens and sessions, rotate the service principal secrets,
+     and review what actor_b changed (grants, tokens, functions, exports).

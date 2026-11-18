@@ -1,0 +1,81 @@
+# Ported from the Lakewatch content pack rule databricks_audit/workspace_content_exported (v1) to the flat v2 rule format of this demo.
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: adp_workspace_content_exported
+description: Detects when workspace content such as notebooks, files, or folders is exported from the platform
+severity: Informational
+category: Static Signature
+fidelity: FIDELITY_INVESTIGATIVE
+objective: Detect when workspace content (notebooks, files, folders) is exported. Common in development workflows,
+  but useful to track as a potential code and intellectual property exfiltration vector when correlated with other
+  indicators.
+mitre:
+- taxonomy: Enterprise
+  tactic: Collection
+  technique_id: T1213
+  technique: Data from Information Repositories
+  sub_technique_id: T1213.003
+  sub_technique: Code Repositories
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule:
+  at_least_every: 1h
+  enabled: false
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      FROM {{audit_table}}
+      |> WHERE
+        IN_TIMERANGE(event_time)
+        AND service_name = 'workspace'
+        AND action_name = 'workspaceExport'
+        -- Exclude Lakewatch background tasks. coalesce(..., FALSE) keeps the event
+        -- whenever any identity_metadata field is null, so a row is dropped only when
+        -- it is definitively a Lakewatch service principal.
+        AND NOT coalesce(
+          -- Check that both the run_by and run_as are service principals
+          identity_metadata.run_by RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          AND identity_metadata.run_as RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          -- Ensure that either the run_by or run_as is named like a lakewatch SP
+          AND (
+            identity_metadata.run_by_display_name RLIKE '(?i)lakewatch'
+            OR identity_metadata.run_as_display_name RLIKE '(?i)lakewatch'
+          ),
+          FALSE
+        )
+      |> SELECT *
+      |> SELECT event_time,
+           user_identity.email AS actor,
+           CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR identity_metadata.acting_resource_type ILIKE '%service principal%' THEN 'sp' ELSE 'user' END AS actor_kind,
+           source_ip_address AS src_ip,
+           session_id,
+           service_name,
+           action_name,
+           workspace_id,
+           user_agent,
+           response.status_code AS status_code,
+           to_json(request_params) AS params,
+           user_identity.email AS user_identity_email
+output:
+  summary: Workspace content exported by {user_identity_email}
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '6'
+    session_id: '{session_id}'
+    service_name: '{service_name}'
+    action_name: '{action_name}'
+    workspace_id: '{workspace_id}'
+    user_agent: '{user_agent}'
+    status_code: '{status_code}'
+    params: '{params}'
+    user_identity_email: '{user_identity_email}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+annotations:
+  content_pack: databricks_audit
+  pack_rule: workspace_content_exported

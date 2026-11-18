@@ -1,0 +1,89 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_session_reuse_new_ip_ua
+description: One browser session id is used from two or more (source IP, user agent) pairs within 30 minutes.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 1 (access). A stolen session cookie is replayed from another machine. A browser session
+  normally keeps one source IP and one browser. The rule reads the rows that have a session_id
+  (interactive workspace actions; login events and account-level rows have none) and counts, for
+  each row, the distinct (source IP, user agent) pairs of the same session in the 30 minutes up to
+  that row (a sliding RANGE frame). Two or more pairs, with the row in the run window, is a
+  finding: one per session. False positives: a laptop that changes network (Wi-Fi to VPN) in the
+  middle of a session; then the user agent stays the same, so check user_agents.
+references:
+  - https://attack.mitre.org/techniques/T1550/004/
+  - https://attack.mitre.org/techniques/T1539/
+mitre:
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1550,
+     technique: Use Alternate Authentication Material, sub_technique_id: T1550.004,
+     sub_technique: Web Session Cookie}
+  - {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1539, technique: Steal Web Session Cookie}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      WITH sess AS (
+        FROM {{audit_table}}
+        |> WHERE session_id IS NOT NULL AND session_id <> ''
+             -- concat_ws skips NULLs: a NULL IP would make 'ua' and 'ip|ua' two pairs
+             AND source_ip_address IS NOT NULL AND source_ip_address <> ''
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, session_id, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, coalesce(user_agent, '') AS user_agent
+      ),
+      active AS (
+        FROM sess
+        |> WHERE IN_TIMERANGE(event_time)
+        |> AGGREGATE count(*) AS n GROUP BY session_id
+      ),
+      framed AS (
+        FROM sess AS s
+        |> LEFT SEMI JOIN active AS a ON a.session_id = s.session_id
+        |> EXTEND size(collect_set(concat_ws('|', s.src_ip, s.user_agent)) OVER (
+                    PARTITION BY s.session_id ORDER BY s.event_time
+                    RANGE BETWEEN INTERVAL 30 MINUTES PRECEDING AND CURRENT ROW)) AS pairs_30m
+      ),
+      hits AS (
+        FROM framed
+        |> WHERE pairs_30m >= 2 AND IN_TIMERANGE(event_time)
+        |> AGGREGATE max(event_time) AS event_time, min(event_time) AS first_time,
+                     max_by(src_ip, event_time) AS src_ip
+           GROUP BY session_id, actor, actor_kind
+      )
+      FROM hits AS h
+      |> JOIN sess AS s
+           ON s.session_id = h.session_id AND s.event_time >= h.first_time - INTERVAL 30 MINUTES
+          AND s.event_time <= h.event_time
+      |> AGGREGATE max(h.event_time) AS event_time, max(h.src_ip) AS src_ip,
+                   array_join(array_sort(collect_set(s.src_ip)), ', ') AS src_ips,
+                   array_join(array_sort(collect_set(s.user_agent)), ' | ') AS user_agents
+         GROUP BY h.session_id AS session_id, h.actor AS actor, h.actor_kind AS actor_kind
+      |> SELECT event_time, actor, actor_kind, src_ip, session_id, src_ips, user_agents
+output:
+  summary: 'Session of {actor} reused from another IP and browser'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '1'
+    session_id: '{session_id}'
+    src_ips: '{src_ips}'
+    user_agents: '{user_agents}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Compare src_ips and user_agents: one known IP and browser of the user, one unknown?
+  2. Ask the user if they changed network or browser in that half hour.
+  3. If not, end the user's sessions, reset the password and MFA, and check what the session did
+     from src_ip (exports, downloads).

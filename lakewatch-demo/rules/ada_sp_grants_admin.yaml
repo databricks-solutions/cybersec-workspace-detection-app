@@ -1,0 +1,70 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_sp_grants_admin
+description: A service principal adds a principal to an admin group, makes a user admin, or changes a permission assignment.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 5 (persistence and privilege escalation). After the pivot, the attacker uses the service
+  principal to give a second identity admin rights, so the access stays after the service principal
+  secret is rotated. Admin changes are normally made by people through the console or by an
+  identity-provisioning tool, not by data pipeline service principals. The rule takes each
+  successful call in the run window by a service principal of accounts.addPrincipalToGroup with
+  targetGroupName admins or workspace-admins, setAdmin, or updatePermissionAssignment. One finding
+  per service principal. False positives: a SCIM or Terraform service principal that manages
+  groups; list those in an exception.
+references:
+  - https://attack.mitre.org/techniques/T1098/003/
+mitre:
+  - {taxonomy: Enterprise, tactic: Persistence, technique_id: T1098, technique: Account Manipulation,
+     sub_technique_id: T1098.003, sub_technique: Additional Cloud Roles}
+  - {taxonomy: Enterprise, tactic: Privilege Escalation, technique_id: T1098, technique: Account Manipulation,
+     sub_technique_id: T1098.003, sub_technique: Additional Cloud Roles}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      FROM {{audit_table}}
+      |> WHERE IN_TIMERANGE(event_time) AND response.status_code = 200
+           AND ((action_name = 'addPrincipalToGroup'
+                 AND request_params.targetGroupName IN ('admins', 'workspace-admins'))
+             OR action_name IN ('setAdmin', 'updatePermissionAssignment'))
+      |> SELECT event_time, user_identity.email AS actor,
+                CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                       OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                     THEN 'sp' ELSE 'user' END AS actor_kind,
+                source_ip_address AS src_ip, workspace_id,
+                concat(service_name, '.', action_name) AS action,
+                coalesce(request_params.targetUserName, request_params.targetUserId,
+                         request_params.targetGroupName) AS target,
+                request_params.targetGroupName AS target_group
+      |> WHERE actor_kind = 'sp' AND actor IS NOT NULL AND actor <> ''
+      |> AGGREGATE max(event_time) AS event_time, max_by(src_ip, event_time) AS src_ip,
+                   array_join(array_sort(collect_set(action)), ', ') AS actions,
+                   array_join(array_sort(collect_set(target)), ', ') AS targets,
+                   array_join(array_sort(collect_set(target_group)), ', ') AS target_groups,
+                   array_join(array_sort(collect_set(workspace_id)), ', ') AS workspaces
+         GROUP BY actor, actor_kind
+      |> SELECT event_time, actor, actor_kind, src_ip, actions, targets, target_groups, workspaces
+output:
+  summary: 'Service principal {actor} granted admin rights'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '5'
+    actions: '{actions}'
+    targets: '{targets}'
+    target_groups: '{target_groups}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Remove the new admin membership of every principal in targets, unless a change ticket covers it.
+  2. Rotate the secrets of the service principal (actor) and look at how it authenticated (src_ip, user agent).
+  3. Check what the principals in targets did after event_time.

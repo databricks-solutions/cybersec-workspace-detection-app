@@ -1,0 +1,76 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_discovery_api_burst
+description: One identity calls five or more distinct discovery APIs within 60 seconds.
+severity: Medium
+category: Statistical
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 2 (discovery). After access, an attacker maps what the identity can reach: secret scopes,
+  catalogs, external locations, storage credentials, repos, account configurations. People and
+  jobs call one or two of these list APIs at a time; a tool that walks them all calls many within
+  seconds. For each discovery call in the run window, the rule counts the distinct discovery actions
+  of the same identity in the 60 seconds up to that call (a sliding RANGE frame, so a burst that
+  crosses a minute boundary is not split). Five or more is a finding, one per identity and run.
+  False positives: admin tools and inventory jobs (add them to an allow list after review).
+references:
+  - https://attack.mitre.org/techniques/T1526/
+  - https://attack.mitre.org/techniques/T1580/
+mitre:
+  - {taxonomy: Enterprise, tactic: Discovery, technique_id: T1526, technique: Cloud Service Discovery}
+  - {taxonomy: Enterprise, tactic: Discovery, technique_id: T1580, technique: Cloud Infrastructure Discovery}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      -- History from 14 days back (discovery calls only, few rows), so a burst at the start of the
+      -- run window keeps the calls just before the window, whatever the lookback.
+      WITH disc AS (
+        FROM {{audit_table}}
+        |> WHERE event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+             AND concat(service_name, '.', action_name) IN (
+               'secrets.listScopes', 'secrets.listSecrets', 'unityCatalog.listMetastores',
+               'unityCatalog.listCatalogs', 'unityCatalog.listSchemas', 'unityCatalog.listExternalLocations',
+               'unityCatalog.listStorageCredentials', 'repos.listRepos',
+               'accountsManager.listWorkspaceConfigurations', 'accountsManager.listNetworkConfigurations',
+               'accountsManager.listStorageConfigurations')
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, concat(service_name, '.', action_name) AS action
+        |> WHERE actor IS NOT NULL AND actor <> ''
+      ),
+      framed AS (
+        FROM disc
+        |> EXTEND collect_set(action) OVER (
+                    PARTITION BY actor ORDER BY event_time
+                    RANGE BETWEEN INTERVAL 60 SECONDS PRECEDING AND CURRENT ROW) AS actions_60s
+      )
+      FROM framed
+      |> WHERE size(actions_60s) >= 5 AND IN_TIMERANGE(event_time)
+      |> AGGREGATE max(event_time) AS event_time, min(event_time) AS first_time,
+                   max_by(src_ip, event_time) AS src_ip, max(size(actions_60s)) AS max_distinct,
+                   max_by(actions_60s, size(actions_60s)) AS actions
+         GROUP BY actor, actor_kind
+      |> SELECT event_time, actor, actor_kind, src_ip, max_distinct,
+                array_join(array_sort(actions), ', ') AS actions
+output:
+  summary: 'Discovery API burst by {actor}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '2'
+    actions: '{actions}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Is the identity an admin tool or an inventory job? If yes, note it and close.
+  2. Check how the identity signed in just before (new PAT source IP, new OAuth client).
+  3. Look for secret reads, grants and exports by the same identity in the next hour.
