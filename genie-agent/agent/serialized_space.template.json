@@ -1217,7 +1217,7 @@
           }
         ],
         "usage_guidance": [
-          "Account-level setting changes (setSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. Use for: account level configuration changes, account settings modified, what changed at the account level, setSetting events, account-wide config changes, who changed an account setting."
+          "Account-level setting changes and deletions (setSetting and deleteSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. severity is High for account IP access list and network policy settings (acct_ip_acl_rule, acct_ip_acl_enable, network_policy, network_policy_binding): deleting or loosening them removes network controls everywhere. Use for: account level configuration changes, account settings modified or deleted, what changed at the account level, setSetting, deleteSetting, account IP access list rule deleted, network policy changed, account-wide config changes, who changed an account setting."
         ]
       },
       {
