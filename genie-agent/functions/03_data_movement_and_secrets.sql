@@ -491,7 +491,7 @@ RETURNS TABLE (
   statement_id       STRING    COMMENT 'statement_id (query history) or commandId (audit), for pivoting',
   statement_text     STRING    COMMENT 'SENSITIVE: the full statement/command carrying the encoded payload. Redact before sharing.'
 )
-COMMENT 'SQL statements, notebook/job commands and Command Execution API calls that decode a hex or base64 payload at runtime (UNHEX(), xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command, or that ENCODE secret values (base64/hex of dbutils.secrets.get or SQL secret(), or a list-read-encode dump of scopes) to get past output redaction. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Observed in Databricks pen tests to hide curl exfiltration, reverse shells and credential harvesting from plain-text keyword detections. Reads BOTH system.query.history AND system.access.audit (notebook + job command events, and data-plane-router commandExecute when verbose audit logging is on) -- requires SELECT on system.query.history. statement_text is the payload itself: SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation, secret redaction bypass, secrets printed encoded, remote command execution API.'
+COMMENT 'SQL statements, notebook/job commands and Command Execution API calls that decode a hex or base64 payload at runtime (UNHEX of a hex string literal, xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command, or that ENCODE secret values (base64/hex of dbutils.secrets.get or SQL secret(), or a list-read-encode dump of scopes) to get past output redaction. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Observed in Databricks pen tests to hide curl exfiltration, reverse shells and credential harvesting from plain-text keyword detections. Reads BOTH system.query.history AND system.access.audit (notebook + job command events, and data-plane-router commandExecute when verbose audit logging is on) -- requires SELECT on system.query.history. statement_text is the payload itself: SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Statements that contain the own text of this function (its encoding_technique column) are excluded, so Genie, Lakewatch or a test running it do not report themselves. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation, secret redaction bypass, secrets printed encoded, remote command execution API.'
 RETURN
   SELECT * FROM (
     SELECT
@@ -500,7 +500,7 @@ RETURN
       'sql_warehouse'            AS surface,
       CASE
         WHEN upper(q.statement_text) RLIKE '(BASE64|HEX|ENCODE|REVERSE)\\s*\\(\\s*SECRET\\s*\\(' THEN 'secret encode (redaction bypass)'
-        WHEN upper(q.statement_text) LIKE '%UNHEX(%'                        THEN 'UNHEX'
+        WHEN q.statement_text RLIKE '(?i)UNHEX\\s*\\(\\s*[\'"][0-9a-fA-F]{16,}' THEN 'UNHEX'
         WHEN q.statement_text LIKE '%xxd%' AND q.statement_text LIKE '%-r%' THEN 'xxd decode'
         WHEN q.statement_text LIKE '%base64%'                               THEN 'base64 decode'
         WHEN q.statement_text LIKE '%printf%'                               THEN 'printf hex'
@@ -511,8 +511,10 @@ RETURN
       q.statement_text           AS statement_text
     FROM system.query.history AS q
     WHERE q.start_time BETWEEN start_time AND end_time
+      -- this function's own text (Genie, Lakewatch or a test running it) is not a payload
+      AND lower(q.statement_text) NOT LIKE '%encoding_technique%'
       AND (
-        upper(q.statement_text) LIKE '%UNHEX(%'
+        q.statement_text RLIKE '(?i)UNHEX\\s*\\(\\s*[\'"][0-9a-fA-F]{16,}'
         OR (q.statement_text LIKE '%xxd%' AND q.statement_text LIKE '%-r%')
         OR (q.statement_text LIKE '%base64%' AND q.statement_text RLIKE '(--decode|-d)\\b')
         OR (q.statement_text LIKE '%printf%' AND q.statement_text RLIKE '[0-9a-fA-F]{20,}'
@@ -526,7 +528,7 @@ RETURN
       CASE WHEN a.action_name = 'commandExecute' THEN 'command_execution_api' ELSE a.service_name END AS surface,
       CASE
         WHEN a.secret_encode                                                THEN 'secret encode (redaction bypass)'
-        WHEN upper(a.cmd) LIKE '%UNHEX(%'                                   THEN 'UNHEX'
+        WHEN a.cmd RLIKE '(?i)UNHEX\\s*\\(\\s*[\'"][0-9a-fA-F]{16,}' THEN 'UNHEX'
         WHEN a.cmd LIKE '%xxd%' AND a.cmd LIKE '%-r%'                       THEN 'xxd decode'
         WHEN a.cmd LIKE '%base64%'                                          THEN 'base64 decode'
         WHEN a.cmd LIKE '%printf%'                                          THEN 'printf hex'
@@ -549,10 +551,11 @@ RETURN
         AND ((x.service_name IN ('notebook', 'jobs') AND x.action_name IN ('runCommand', 'submitCommand'))
              OR (x.service_name = 'data-plane-router' AND x.action_name = 'commandExecute'))
     ) AS a
-    WHERE upper(a.cmd) LIKE '%UNHEX(%'
+    WHERE lower(COALESCE(a.cmd, '')) NOT LIKE '%encoding_technique%'
+      AND (a.cmd RLIKE '(?i)UNHEX\\s*\\(\\s*[\'"][0-9a-fA-F]{16,}'
        OR (a.cmd LIKE '%xxd%' AND a.cmd LIKE '%-r%')
        OR (a.cmd LIKE '%base64%' AND a.cmd RLIKE '(--decode|-d)\\b')
        OR (a.cmd LIKE '%printf%' AND a.cmd RLIKE '[0-9a-fA-F]{20,}'
            AND (a.cmd LIKE '%xxd%' OR a.cmd RLIKE '\\|\\s*(ba)?sh\\b'))
-       OR a.secret_encode
+       OR a.secret_encode)
   );

@@ -67,10 +67,17 @@
 @detect(output=Output.asDataFrame)
 def encoded_command_execution(earliest: str = None, latest: str = None, target_user: str = None):
     from pyspark.sql.functions import (col, current_timestamp, expr, to_timestamp,
-                                       upper, lit, when, coalesce)
+                                       upper, lower, lit, when, coalesce)
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 7 days")
     latest = latest or current_timestamp()
+
+    # UNHEX of a hex string literal (the obfuscation shape: UNHEX('6375726c...')). A bare
+    # "UNHEX(" also matched every query and notebook that merely mentions the function --
+    # including this detection's own SQL when Lakewatch or a test runs it.
+    unhex_literal = r"""(?i)UNHEX\s*\(\s*['"][0-9a-fA-F]{16,}"""
+    # Commands that carry this detection's own text (its output column names) are its own runs.
+    self_marker = "encoding_technique"
 
     # --- Source 1: SQL query history ---
     # Covers SQL cells, DBSQL warehouses, and SQL-via-API
@@ -78,9 +85,10 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
 
     qh_filtered = qh.filter(
         (col("start_time").between(earliest, latest)) &
+        ~lower(col("statement_text")).contains(self_marker) &
         (
-            # UNHEX() used to decode a hex string inside SQL
-            upper(col("statement_text")).contains("UNHEX(") |
+            # UNHEX() used to decode a hex string literal inside SQL
+            col("statement_text").rlike(unhex_literal) |
             # xxd reverse-decode: hex bytes piped through xxd -r -p and executed
             (col("statement_text").contains("xxd") & col("statement_text").contains("-r")) |
             # base64 decode piped to a shell. Match -d / --decode on a word boundary so
@@ -112,7 +120,7 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
         # branch that matches, in the order below.
         when(upper(col("statement_text")).rlike(r"(BASE64|HEX|ENCODE|REVERSE)\s*\(\s*SECRET\s*\("),
              lit("secret encode (redaction bypass)"))
-        .when(upper(col("statement_text")).contains("UNHEX("), lit("UNHEX"))
+        .when(col("statement_text").rlike(unhex_literal), lit("UNHEX"))
         .when(col("statement_text").contains("xxd") & col("statement_text").contains("-r"), lit("xxd decode"))
         .when(col("statement_text").contains("base64"), lit("base64 decode"))
         .when(col("statement_text").contains("printf"), lit("printf hex"))
@@ -155,8 +163,9 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
              col("action_name").isin("runCommand", "submitCommand")) |
             ((col("service_name") == "data-plane-router") & (col("action_name") == "commandExecute"))
         ) &
+        ~lower(coalesce(cmd, lit(""))).contains(self_marker) &
         (
-            upper(cmd).contains("UNHEX(") |
+            cmd.rlike(unhex_literal) |
             (cmd.contains("xxd") & cmd.contains("-r")) |
             # base64 decode on a word boundary — catches `base64 -d|bash`, `base64 -d<<<...`
             (cmd.contains("base64") & cmd.rlike(r"(--decode|-d)\b")) |
@@ -178,7 +187,7 @@ def encoded_command_execution(earliest: str = None, latest: str = None, target_u
         coalesce(col("request_params.commandId"), col("request_params.context_id")).alias("STATEMENT_ID"),
         # First-match label for triage, NOT exhaustive — see note on the query-history branch.
         when(secret_encode, lit("secret encode (redaction bypass)"))
-        .when(upper(cmd).contains("UNHEX("), lit("UNHEX"))
+        .when(cmd.rlike(unhex_literal), lit("UNHEX"))
         .when(cmd.contains("xxd") & cmd.contains("-r"), lit("xxd decode"))
         .when(cmd.contains("base64"), lit("base64 decode"))
         .when(cmd.contains("printf"), lit("printf hex"))
