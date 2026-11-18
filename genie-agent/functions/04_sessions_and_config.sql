@@ -17,10 +17,13 @@
 -- One identity logging in from multiple IPs in a short window.
 -- Port of behavioral/session_hijacking_frequent_logins.py.
 --
--- The notebook's user_agent allowlist (databricks, Databricks-Service/driver,
+-- The notebook's user_agent allowlist (Databricks-Service/driver,
 -- Databricks-Runtime, Delta-Sharing-SparkStructuredStreaming, RawDBHttpClient,
--- mlflow-python, feature-store, dbr:) excludes platform services that
+-- wsfs/, mlflow-python, feature-store, dbr:) excludes platform services that
 -- legitimately authenticate from many hosts. Dropping it would bury the signal.
+-- It is matched case-sensitively and deliberately has no bare 'databricks':
+-- that matched databricks-cli, databricks-sdk-* and the SQL connectors, which is
+-- exactly the tooling an actor with a stolen token uses.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_session_multi_ip_logins(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
@@ -49,11 +52,18 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.event_time BETWEEN start_time AND end_time
     AND a.service_name = 'accounts'
-    AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin')
+    -- Entra (aad*) and OAuth (oidc*, mintOAuthToken) logins are how service principals and
+    -- Entra tokens authenticate; without them those identities were invisible.
+    AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
+                          'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')
     AND a.user_identity.email IS NOT NULL
-    AND NOT a.source_ip_address RLIKE '^(10\\..*|192\\.168\\..*|172\\.(1[6-9]|2[0-9]|3[0-1])\\..*)$'
-    AND NOT lower(COALESCE(a.user_agent, '')) RLIKE
-        'databricks|databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming|rawdbhttpclient|mlflow-python|feature-store|dbr:'
+    -- RFC 1918, CGNAT / Databricks-internal (100.64.0.0/10), loopback, link-local, IPv6 unique-local.
+    AND NOT a.source_ip_address RLIKE
+        '^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[0-1])\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|127\\.|169\\.254\\.|(?i)f[cd][0-9a-f]{2}:)'
+    -- Databricks-internal service clients only, case-sensitive. A bare 'databricks' (and lower())
+    -- used to drop databricks-cli, databricks-sdk-* and the SQL connectors -- an actor's own tooling.
+    AND NOT COALESCE(a.user_agent, '') RLIKE
+        'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming|RawDBHttpClient|wsfs/|mlflow-python|feature-store|dbr:'
   GROUP BY a.user_identity.email
   HAVING COUNT(DISTINCT a.source_ip_address) >= min_ips;
 
@@ -65,26 +75,33 @@ RETURN
 -- browser on one machine. The same session presenting from two IPs or two user
 -- agents is a stolen session cookie, not a travelling user -- a legitimate user
 -- changing network gets a NEW session.
+--
+-- Token and OAuth login rows (tokenLogin, oidcTokenAuthorization, mintOAuthToken)
+-- carry no session_id, so the credential is the tokenId / client_id. A token is
+-- reported only when it is seen from a second public IP: the same token used by
+-- two clients from one host (CLI plus a script) is normal.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_session_multi_device(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
 RETURNS TABLE (
-  session_id     STRING    COMMENT 'The session presenting from more than one place',
-  actor          STRING    COMMENT 'Identity the session belongs to',
-  distinct_ips   BIGINT    COMMENT 'Distinct public IPs using this session',
-  distinct_agents BIGINT   COMMENT 'Distinct user agents using this session',
-  source_ips     STRING    COMMENT 'The IPs, comma separated',
-  user_agents    STRING    COMMENT 'The clients, comma separated',
-  first_seen     TIMESTAMP COMMENT 'First activity (UTC)',
-  last_seen      TIMESTAMP COMMENT 'Last activity (UTC)',
-  events         BIGINT    COMMENT 'Events on this session'
+  credential_id   STRING    COMMENT 'The session id, or for token/OAuth logins the token id or OAuth client id',
+  credential_type STRING    COMMENT 'session (browser) or token (PAT / OAuth token / OAuth client)',
+  actor           STRING    COMMENT 'Identity the credential belongs to',
+  distinct_ips    BIGINT    COMMENT 'Distinct public IPs using this credential',
+  distinct_agents BIGINT    COMMENT 'Distinct user agents using this credential',
+  source_ips      STRING    COMMENT 'The IPs, comma separated',
+  user_agents     STRING    COMMENT 'The clients, comma separated',
+  first_seen      TIMESTAMP COMMENT 'First activity (UTC)',
+  last_seen       TIMESTAMP COMMENT 'Last activity (UTC)',
+  events          BIGINT    COMMENT 'Logins with this credential'
 )
-COMMENT 'A single session id used from more than one public IP or more than one user agent. MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. This is the strongest session signal available in audit data: one session belongs to one browser on one machine, and a legitimate user changing network gets a NEW session rather than carrying the old one. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, same session from different devices, session used from two IPs, hijacked session, session anomaly.'
+COMMENT 'A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly.'
 RETURN
   SELECT
-    a.session_id,
+    COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) AS credential_id,
+    CASE WHEN a.session_id IS NOT NULL THEN 'session' ELSE 'token' END AS credential_type,
     MAX(a.user_identity.email) AS actor,
     COUNT(DISTINCT a.source_ip_address) AS distinct_ips,
     COUNT(DISTINCT a.user_agent) AS distinct_agents,
@@ -96,14 +113,17 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.event_time BETWEEN start_time AND end_time
     AND a.service_name = 'accounts'
-    AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin')
-    AND a.session_id IS NOT NULL
-    AND NOT a.source_ip_address RLIKE '^(10\\..*|192\\.168\\..*|172\\.(1[6-9]|2[0-9]|3[0-1])\\..*)$'
-    AND NOT lower(COALESCE(a.user_agent, '')) RLIKE
-        'databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming'
-  GROUP BY a.session_id
+    AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
+                          'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')
+    AND COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) IS NOT NULL
+    AND NOT a.source_ip_address RLIKE
+        '^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[0-1])\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|127\\.|169\\.254\\.|(?i)f[cd][0-9a-f]{2}:)'
+    AND NOT COALESCE(a.user_agent, '') RLIKE
+        'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming'
+  GROUP BY COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']),
+           CASE WHEN a.session_id IS NOT NULL THEN 'session' ELSE 'token' END
   HAVING COUNT(DISTINCT a.source_ip_address) > 1
-      OR COUNT(DISTINCT a.user_agent) > 1;
+      OR (MAX(CASE WHEN a.session_id IS NOT NULL THEN 1 ELSE 0 END) = 1 AND COUNT(DISTINCT a.user_agent) > 1);
 
 -- --------------------------------------------------------------------------
 -- Many sessions from one source IP.
@@ -121,7 +141,7 @@ CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_session_high_count_per_ip
 )
 RETURNS TABLE (
   source_ip        STRING    COMMENT 'Public source IP',
-  distinct_sessions BIGINT   COMMENT 'Distinct session ids from this IP',
+  distinct_sessions BIGINT   COMMENT 'Distinct credentials from this IP: session ids, plus token ids / OAuth client ids for token logins',
   distinct_actors  BIGINT    COMMENT 'Distinct identities from this IP -- >1 suggests a shared node or stuffing',
   actors           STRING    COMMENT 'The identities, comma separated',
   user_agents      STRING    COMMENT 'Distinct clients',
@@ -133,7 +153,7 @@ COMMENT 'Public source IPs producing an unusually high number of distinct sessio
 RETURN
   SELECT
     a.source_ip_address AS source_ip,
-    COUNT(DISTINCT a.session_id) AS distinct_sessions,
+    COUNT(DISTINCT COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id'])) AS distinct_sessions,
     COUNT(DISTINCT a.user_identity.email) AS distinct_actors,
     CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,
     CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,
@@ -142,12 +162,14 @@ RETURN
     COUNT(*) AS events
   FROM system.access.audit AS a
   WHERE a.event_time BETWEEN start_time AND end_time
-    AND a.session_id IS NOT NULL
-    AND NOT a.source_ip_address RLIKE '^(10\\..*|192\\.168\\..*|172\\.(1[6-9]|2[0-9]|3[0-1])\\..*)$'
-    AND NOT lower(COALESCE(a.user_agent, '')) RLIKE
-        'databricks|databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming|rawdbhttpclient|mlflow-python|feature-store'
+    -- Token and OAuth logins carry no session_id; count their token / client id as the credential.
+    AND COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) IS NOT NULL
+    AND NOT a.source_ip_address RLIKE
+        '^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[0-1])\\.|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|127\\.|169\\.254\\.|(?i)f[cd][0-9a-f]{2}:)'
+    AND NOT COALESCE(a.user_agent, '') RLIKE
+        'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming|RawDBHttpClient|wsfs/|mlflow-python|feature-store'
   GROUP BY a.source_ip_address
-  HAVING COUNT(DISTINCT a.session_id) >= min_sessions;
+  HAVING COUNT(DISTINCT COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id'])) >= min_sessions;
 
 -- --------------------------------------------------------------------------
 -- Verbose audit logging disabled.
