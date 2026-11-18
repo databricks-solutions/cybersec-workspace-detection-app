@@ -96,37 +96,49 @@ RETURN
 -- Bulk download / export out of the workspace.
 -- Port of behavioral/potential_data_movement_workspace_downloads.py.
 --
--- Two notebook exclusions are preserved deliberately, and both matter for
--- noise: workspaceExport with format SOURCE is normal notebook source control,
--- and downloadQueryResult with fileType 'arrows' is the UI's own result
--- rendering rather than a user-initiated download.
---
--- Verified live: filesGet (227,791), workspaceExport (28,045),
--- downloadQueryResult (3), downloadLargeResults (1). filesGet dominates, so
--- expect volume -- aggregate by actor before reading rows.
+-- SOURCE-format workspaceExport is INCLUDED: it is what the REST API, CLI and
+-- scripted dumps use, so excluding it hid most bulk exports. downloadQueryResult
+-- with fileType 'arrows' stays excluded (UI rendering, not a user download).
+-- distinct_objects and foreign_homes are what separate a sweep from routine
+-- sync: on the reference workspace every heavy exporter (CLI sync, CI service
+-- principals, SAT) exported a single home folder.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_data_movement_downloads(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
 RETURNS TABLE (
-  event_date   DATE      COMMENT 'Day of activity (UTC)',
-  actor        STRING    COMMENT 'Identity that downloaded',
-  action       STRING    COMMENT 'Download/export action',
-  downloads    BIGINT    COMMENT 'Download events by this actor+action that day -- the volume signal',
-  distinct_ips BIGINT    COMMENT 'Distinct source IPs used',
-  source_ips   STRING    COMMENT 'The IPs, comma separated',
-  user_agents  STRING    COMMENT 'Distinct clients used',
-  first_seen   TIMESTAMP COMMENT 'First download that day (UTC)',
-  last_seen    TIMESTAMP COMMENT 'Last download that day (UTC)'
+  event_date       DATE      COMMENT 'Day of activity (UTC)',
+  actor            STRING    COMMENT 'Identity that downloaded',
+  action           STRING    COMMENT 'Download/export action',
+  downloads        BIGINT    COMMENT 'Download events by this actor+action that day -- the volume signal',
+  distinct_objects BIGINT    COMMENT 'Distinct notebooks, files, artifacts or model versions',
+  foreign_homes    BIGINT    COMMENT 'Distinct OTHER users home folders exported from -- >1 suggests a sweep',
+  export_formats   STRING    COMMENT 'workspaceExport formats used (SOURCE, AUTO, JUPYTER, DBC, HTML)',
+  distinct_ips     BIGINT    COMMENT 'Distinct source IPs used',
+  source_ips       STRING    COMMENT 'The IPs, comma separated',
+  user_agents      STRING    COMMENT 'Distinct clients used',
+  first_seen       TIMESTAMP COMMENT 'First download that day (UTC)',
+  last_seen        TIMESTAMP COMMENT 'Last download that day (UTC)'
 )
-COMMENT 'Data leaving the workspace via download or export, AGGREGATED per actor, action and day: downloadPreviewResults, downloadLargeResults, filesGet, getModelVersionDownloadUri, getModelVersionSignedDownloadUri, workspaceExport (excluding SOURCE format, which is normal source control) and downloadQueryResult (excluding arrows, which is UI rendering). MITRE T1567, TA0010 Exfiltration. Deliberately aggregated, not row-per-event: this is the highest-volume detection here (227,000+ filesGet events from 6 actors in one reference 90-day window), so per-event rows would be unreadable and would truncate. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, result downloads, data leaving the workspace, exfiltration via download, download volume by user.'
+COMMENT 'Data leaving the workspace via download or export, AGGREGATED per actor, action and day: workspaceExport in every format (SOURCE included -- it is what the REST API, CLI and scripted dumps use), filesGet, createDownloadUrl, downloadPreviewResults, downloadLargeResults, downloadQueryResult (excluding arrows, which is UI rendering), getModelVersionDownloadUri, getModelVersionSignedDownloadUri, MLflow readArtifact and readTraceData, and UC model-version read credentials. MITRE T1567, TA0010 Exfiltration. distinct_objects counts distinct notebooks, files, artifacts or model versions; foreign_homes counts OTHER users home folders (/Users/<x>, /Repos/<x>) exported from. Heavy legitimate exporters (CLI sync, CI, scanners) export one home folder; a sweep across several users homes is the exfiltration shape, so sort by foreign_homes, then distinct_objects. Deliberately aggregated, not row-per-event, because this is the highest-volume detection. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, notebook export sweep, exported other users notebooks, result downloads, artifact downloads, data leaving the workspace, exfiltration via download, download volume by user.'
 RETURN
   SELECT
     to_date(a.event_time) AS event_date,
     a.user_identity.email AS actor,
     a.action_name AS action,
     COUNT(*) AS downloads,
+    COUNT(DISTINCT COALESCE(a.request_params['notebookFullPath'], a.request_params['path'],
+                            a.request_params['filePath'], a.request_params['artifactLocation'],
+                            a.request_params['request_id'],
+                            CONCAT(a.request_params['model_name'], '/', a.request_params['version']),
+                            a.event_id)) AS distinct_objects,
+    COUNT(DISTINCT CASE
+      WHEN lower(regexp_extract(COALESCE(a.request_params['notebookFullPath'], a.request_params['path'], ''),
+                                '^(/Workspace)?/(Users|Repos)/([^/]+)', 3)) NOT IN ('', lower(a.user_identity.email))
+      THEN regexp_extract(COALESCE(a.request_params['notebookFullPath'], a.request_params['path'], ''),
+                          '^(/Workspace)?/(Users|Repos)/([^/]+)', 3) END) AS foreign_homes,
+    CONCAT_WS(', ', COLLECT_SET(a.request_params['workspaceExportFormat'])) AS export_formats,
     COUNT(DISTINCT a.source_ip_address) AS distinct_ips,
     CONCAT_WS(', ', COLLECT_SET(a.source_ip_address)) AS source_ips,
     CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,
@@ -135,12 +147,13 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.event_time BETWEEN start_time AND end_time
     AND (
-      a.action_name IN ('downloadPreviewResults', 'downloadLargeResults', 'filesGet',
-                        'getModelVersionDownloadUri', 'getModelVersionSignedDownloadUri')
-      OR (a.action_name = 'workspaceExport'
-          AND COALESCE(a.request_params['workspaceExportFormat'], '') <> 'SOURCE')
+      a.action_name IN ('downloadPreviewResults', 'downloadLargeResults', 'filesGet', 'createDownloadUrl',
+                        'getModelVersionDownloadUri', 'getModelVersionSignedDownloadUri',
+                        'readArtifact', 'readTraceData', 'workspaceExport')
       OR (a.action_name = 'downloadQueryResult'
           AND COALESCE(a.request_params['fileType'], '') <> 'arrows')
+      OR (a.action_name = 'generateTemporaryModelVersionCredential'
+          AND a.request_params['operation'] = 'READ_MODEL_VERSION')
     )
   GROUP BY to_date(a.event_time), a.user_identity.email, a.action_name;
 
