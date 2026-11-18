@@ -66,6 +66,16 @@ def session_hijack_multi_session_multi_device(earliest: str, latest: str = None,
     login_actions = ["login", "tokenLogin", "samlLogin", "jwtLogin", "aadTokenLogin", "oidcTokenAuthorization",
                      "aadBrowserLogin", "oidcBrowserLogin", "mintOAuthToken"]
 
+    # Platform egress: IPs that also carry Databricks-internal authentication in the window
+    # (cluster-internal PATs, in-house OAuth clients behind Apps / serverless). A user's token
+    # relayed by a Databricks App shows up from these; they are not a second location.
+    platform_ips = spark.table("system.access.audit") \
+        .filter((F.col("event_time") >= earliest) & (F.col("event_time") <= latest)) \
+        .filter(F.col("request_params.authenticationMethod").isin("API_INT_PAT_TOKEN", "API_INHOUSE_OAUTH_TOKEN") |
+                F.col("action_name").isin("workspaceInHouseOAuthClientAuthentication",
+                                          "accountInHouseOAuthClientAuthentication")) \
+        .select(F.col("source_ip_address").alias("platform_ip")).distinct()
+
     # Load audit logs within the time range. Token and OAuth login rows carry no session_id, so
     # requiring one (as this rule used to) hid PAT and OAuth replay entirely; the credential is
     # identified by request_params.tokenId (PAT / OAuth token) or client_id (OAuth M2M mint).
@@ -80,7 +90,8 @@ def session_hijack_multi_session_multi_device(earliest: str, latest: str = None,
         .withColumn("credential", F.coalesce(F.col("token_credential"), F.col("user_identity.email"))) \
         .filter(F.col("credential").isNotNull()) \
         .select("event_time", "user_identity.email", "session_id", "credential", "credential_type",
-                "source_ip_address", "user_agent", "audit_level")
+                "source_ip_address", "user_agent", "audit_level") \
+        .join(platform_ips, F.col("source_ip_address") == F.col("platform_ip"), "left_anti")
 
     # Define window partitioning by credential (the token, or the user for interactive logins)
     window_spec = Window.partitionBy("credential").orderBy("event_time")
