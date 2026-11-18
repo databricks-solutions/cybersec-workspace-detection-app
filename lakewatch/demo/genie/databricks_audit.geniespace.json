@@ -753,6 +753,8 @@
           "      a.event_time,\n",
           "      a.user_identity.email,\n",
           "      a.request_params['targetUserName'],\n",
+          "      CASE WHEN a.request_params['targetUserName'] RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'\n",
+          "           THEN 'service_principal' ELSE 'user' END,\n",
           "      a.request_params['endpoint'],\n",
           "      a.source_ip_address,\n",
           "      a.user_agent,\n",
@@ -760,10 +762,10 @@
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "    WHERE a.service_name = 'accounts'\n",
           "      AND a.action_name = 'add'\n",
-          "      AND CAST(a.response.status_code AS INT) = 200\n",
-          "      AND a.request_params['endpoint'] = 'adminConsole'\n",
+          "      AND (CAST(a.response.status_code AS INT) = 200 OR a.response.status_code IS NULL)\n",
+          "      AND a.request_params['endpoint'] IN ('adminConsole', 'scim', 'autoUserCreation')\n",
           "      AND a.event_time BETWEEN :start_time AND :end_time\n",
-          ") AS results(event_time, actor, target_user, endpoint, source_ip, user_agent, audit_level)\n"
+          ") AS results(event_time, actor, target_user, target_kind, endpoint, source_ip, user_agent, audit_level)\n"
         ],
         "parameters": [
           {
@@ -786,7 +788,7 @@
           }
         ],
         "usage_guidance": [
-          "User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user."
+          "User accounts and service principals created in the account, through the admin console, the SCIM API (scripts, Terraform, IdP provisioning, or an attacker holding an admin token) or just-in-time SSO provisioning (autoUserCreation). target_kind says whether a user or a service principal was created. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Service principals that Databricks Apps create for themselves (endpoint DatabricksApps) are not included. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user, new service principal created, SCIM user creation, auto-provisioned users."
         ]
       },
       {
@@ -801,15 +803,18 @@
           "      a.event_time,\n",
           "      a.service_name,\n",
           "      a.action_name,\n",
+          "      a.response.status_code,\n",
           "      a.user_identity.email,\n",
           "      a.source_ip_address,\n",
           "      a.user_agent,\n",
           "      a.request_params\n",
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
-          "    WHERE a.action_name IN ('mount', 'createStorageCredential', 'updateStorageCredential',\n",
-          "                            'createConnection', 'updateConnection')\n",
+          "    WHERE (a.action_name IN ('mount', 'createStorageCredential', 'updateStorageCredential',\n",
+          "                             'createExternalLocation', 'updateExternalLocation',\n",
+          "                             'createConnection', 'updateConnection')\n",
+          "           OR (a.action_name = 'createCatalog' AND a.request_params['connection_name'] IS NOT NULL))\n",
           "      AND a.event_time BETWEEN :start_time AND :end_time\n",
-          ") AS results(event_time, service_name, action, actor, source_ip, user_agent, request_params)\n"
+          ") AS results(event_time, service_name, action, status_code, actor, source_ip, user_agent, request_params)\n"
         ],
         "parameters": [
           {
@@ -832,7 +837,7 @@
           }
         ],
         "usage_guidance": [
-          "Creation or modification of external storage mounts, storage credentials, and external connections (mount, createStorageCredential, updateStorageCredential, createConnection, updateConnection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external connections created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
+          "Creation or modification of external storage mounts, storage credentials, external locations, external connections and foreign catalogs (mount, createStorageCredential, updateStorageCredential, createExternalLocation, updateExternalLocation, createConnection, updateConnection, createCatalog with a connection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Refused attempts are kept (status_code 403): probing for a credential or location the actor cannot create is itself a signal. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external locations created, external connections created, foreign catalog created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
         ]
       },
       {
@@ -1007,7 +1012,9 @@
           "SELECT *\n",
           "FROM (\n",
           "  SELECT\n",
-          "      a.request_params['tokenId'] AS token_id,\n",
+          "      COALESCE(a.request_params['tokenId'], a.request_params['client_id'],\n",
+          "               CONCAT(a.request_params['authenticationMethod'], ':', a.user_identity.email)) AS token_id,\n",
+          "      MAX(a.request_params['authenticationMethod']) AS credential_type,\n",
           "      COUNT(DISTINCT regexp_replace(a.source_ip_address, ':[0-9]+$', '')) AS distinct_ips,\n",
           "      CONCAT_WS(', ', COLLECT_SET(regexp_replace(a.source_ip_address, ':[0-9]+$', ''))) AS source_ips,\n",
           "      MIN(a.event_time) AS first_seen,\n",
@@ -1016,11 +1023,21 @@
           "      CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,\n",
           "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents\n",
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
-          "    WHERE a.request_params['authenticationMethod'] = 'API_EXT_PAT_TOKEN'\n",
+          "    LEFT ANTI JOIN (\n",
+          "      -- Platform egress: IPs that also carry Databricks-internal authentication in the\n",
+          "      -- window (cluster-internal PATs, in-house OAuth clients used by Apps/serverless).\n",
+          "      SELECT DISTINCT regexp_replace(p.source_ip_address, ':[0-9]+$', '') AS ip\n",
+          "      FROM `audit_demo_catalog`.`audit_demo`.`audit` AS p\n",
+          "      WHERE p.event_time BETWEEN :start_time AND :end_time\n",
+          "        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')\n",
+          "             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))\n",
+          "    ) AS platform ON regexp_replace(a.source_ip_address, ':[0-9]+$', '') = platform.ip\n",
+          "    WHERE a.request_params['authenticationMethod'] IN ('API_EXT_PAT_TOKEN', 'API_AAD_OAUTH_TOKEN', 'API_OIDC_TOKEN')\n",
           "      AND a.event_time BETWEEN :start_time AND :end_time\n",
-          "      AND a.request_params['tokenId'] IS NOT NULL\n",
-          "    GROUP BY a.request_params['tokenId']\n",
-          ") AS results(token_id, distinct_ips, source_ips, first_seen, last_seen, attempts, actors, user_agents)\n"
+          "    GROUP BY COALESCE(a.request_params['tokenId'], a.request_params['client_id'],\n",
+          "                      CONCAT(a.request_params['authenticationMethod'], ':', a.user_identity.email))\n",
+          "    HAVING COUNT(DISTINCT regexp_replace(a.source_ip_address, ':[0-9]+$', '')) > 1\n",
+          ") AS results(token_id, credential_type, distinct_ips, source_ips, first_seen, last_seen, attempts, actors, user_agents)\n"
         ],
         "parameters": [
           {
@@ -1043,7 +1060,7 @@
           }
         ],
         "usage_guidance": [
-          "Personal access tokens (authenticationMethod API_EXT_PAT_TOKEN) grouped by token, showing how many distinct source IPs presented each one. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials. A single token presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, token abuse, stolen access token, is a token compromised, token used from many IPs."
+          "External API tokens -- personal access tokens (API_EXT_PAT_TOKEN), Entra ID tokens (API_AAD_OAUTH_TOKEN) and Databricks OAuth tokens (API_OIDC_TOKEN) -- grouped by credential, showing how many distinct source IPs presented each one. The credential is the token id, else the OAuth client id, else the principal for that token type; credential_type says which. Only credentials presented from more than one IP are returned. Cluster-internal tokens (API_INT_PAT_TOKEN) and IPs that are Databricks platform egress (they also carry cluster-internal or in-house OAuth authentication, e.g. a Databricks App relaying the user token) are excluded. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials, T1550.001 Application Access Token. A single credential presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, OAuth token used from multiple IPs, Entra or service principal token abuse, token abuse, stolen access token, is a token compromised, token used from many IPs, was any token used from more than one IP."
         ]
       },
       {
@@ -1172,7 +1189,8 @@
           "SELECT *\n",
           "FROM (\n",
           "  SELECT\n",
-          "      a.session_id,\n",
+          "      COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) AS credential_id,\n",
+          "      CASE WHEN a.session_id IS NOT NULL THEN 'session' ELSE 'token' END AS credential_type,\n",
           "      MAX(a.user_identity.email) AS actor,\n",
           "      COUNT(DISTINCT a.source_ip_address) AS distinct_ips,\n",
           "      COUNT(DISTINCT a.user_agent) AS distinct_agents,\n",
@@ -1184,15 +1202,18 @@
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
           "      AND a.service_name = 'accounts'\n",
-          "      AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin')\n",
-          "      AND a.session_id IS NOT NULL\n",
-          "      AND NOT a.source_ip_address RLIKE '^(10\\\\..*|192\\\\.168\\\\..*|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\..*)$'\n",
-          "      AND NOT lower(COALESCE(a.user_agent, '')) RLIKE\n",
-          "          'databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming'\n",
-          "    GROUP BY a.session_id\n",
+          "      AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',\n",
+          "                            'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')\n",
+          "      AND COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) IS NOT NULL\n",
+          "      AND NOT a.source_ip_address RLIKE\n",
+          "          '^(10\\\\.|192\\\\.168\\\\.|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\.|100\\\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\\\.|127\\\\.|169\\\\.254\\\\.|(?i)f[cd][0-9a-f]{2}:)'\n",
+          "      AND NOT COALESCE(a.user_agent, '') RLIKE\n",
+          "          'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming'\n",
+          "    GROUP BY COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']),\n",
+          "             CASE WHEN a.session_id IS NOT NULL THEN 'session' ELSE 'token' END\n",
           "    HAVING COUNT(DISTINCT a.source_ip_address) > 1\n",
-          "        OR COUNT(DISTINCT a.user_agent) > 1\n",
-          ") AS results(session_id, actor, distinct_ips, distinct_agents, source_ips, user_agents, first_seen, last_seen, events)\n"
+          "        OR (MAX(CASE WHEN a.session_id IS NOT NULL THEN 1 ELSE 0 END) = 1 AND COUNT(DISTINCT a.user_agent) > 1)\n",
+          ") AS results(credential_id, credential_type, actor, distinct_ips, distinct_agents, source_ips, user_agents, first_seen, last_seen, events)\n"
         ],
         "parameters": [
           {
@@ -1215,7 +1236,7 @@
           }
         ],
         "usage_guidance": [
-          "A single session id used from more than one public IP or more than one user agent. MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. This is the strongest session signal available in audit data: one session belongs to one browser on one machine, and a legitimate user changing network gets a NEW session rather than carrying the old one. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, same session from different devices, session used from two IPs, hijacked session, session anomaly."
+          "A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly."
         ]
       },
       {
@@ -1232,28 +1253,62 @@
           "    -- number). Verified live -- the identical query runs standalone but the CREATE\n",
           "    -- is rejected until the WITH sits inside SELECT * FROM ( ... ).\n",
           "    SELECT * FROM (\n",
-          "    WITH exports AS (\n",
+          "    WITH platform_ips AS (\n",
+          "      SELECT DISTINCT regexp_replace(p.source_ip_address, ':[0-9]+$', '') AS ip\n",
+          "      FROM `audit_demo_catalog`.`audit_demo`.`audit` AS p\n",
+          "      WHERE p.event_time BETWEEN :start_time AND :end_time\n",
+          "        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')\n",
+          "             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))\n",
+          "    ),\n",
+          "    scan AS (\n",
           "      SELECT\n",
           "        to_date(a.event_time) AS event_date,\n",
           "        a.user_identity.email AS actor,\n",
           "        a.request_params['notebookFullPath'] AS notebook_path,\n",
-          "        a.request_params['workspaceExportFormat'] AS export_format\n",
+          "        a.request_params['workspaceExportFormat'] AS export_format,\n",
+          "        regexp_replace(a.source_ip_address, ':[0-9]+$', '') AS ip,\n",
+          "        COALESCE(NULLIF(regexp_extract(regexp_replace(a.source_ip_address, ':[0-9]+$', ''), '^([0-9]+[.][0-9]+[.][0-9]+)[.]', 1), ''),\n",
+          "                 regexp_replace(a.source_ip_address, ':[0-9]+$', '')) AS net,\n",
+          "        contains(COALESCE(a.request_params['notebookFullPath'], ''), COALESCE(a.user_identity.email, ' ')) AS self_home\n",
           "      FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "      WHERE a.action_name = 'workspaceExport'\n",
           "        AND a.event_time BETWEEN :start_time AND :end_time\n",
-          "        AND NOT contains(COALESCE(a.request_params['notebookFullPath'], ''),\n",
-          "                         COALESCE(a.user_identity.email, ' '))\n",
+          "    ),\n",
+          "    seen_nets AS (\n",
+          "      SELECT DISTINCT b.user_identity.email AS actor,\n",
+          "        COALESCE(NULLIF(regexp_extract(regexp_replace(b.source_ip_address, ':[0-9]+$', ''), '^([0-9]+[.][0-9]+[.][0-9]+)[.]', 1), ''),\n",
+          "                 regexp_replace(b.source_ip_address, ':[0-9]+$', '')) AS net\n",
+          "      FROM `audit_demo_catalog`.`audit_demo`.`audit` AS b\n",
+          "      WHERE b.event_time >= timestampadd(DAY, -(2 + 30), :start_time)\n",
+          "        AND b.event_time <  timestampadd(DAY, -2, :start_time)\n",
+          "        AND b.user_identity.email IN (SELECT DISTINCT actor FROM scan)\n",
+          "    ),\n",
+          "    exports AS (\n",
+          "      SELECT s.*,\n",
+          "             (s.self_home AND n.net IS NULL AND pi.ip IS NULL) AS self_home_new_network\n",
+          "      FROM scan AS s\n",
+          "      LEFT JOIN seen_nets AS n ON s.actor = n.actor AND s.net = n.net\n",
+          "      LEFT JOIN platform_ips AS pi ON s.ip = pi.ip\n",
+          "      WHERE NOT s.self_home OR (n.net IS NULL AND pi.ip IS NULL)\n",
           "    ),\n",
           "    per_user_day AS (\n",
           "      SELECT event_date, actor,\n",
           "             COUNT(DISTINCT notebook_path) AS notebooks_exported,\n",
-          "             CONCAT_WS('/', COLLECT_SET(export_format)) AS formats_used\n",
+          "             COUNT(DISTINCT CASE WHEN self_home_new_network THEN notebook_path END) AS self_home_new_network,\n",
+          "             CONCAT_WS('/', COLLECT_SET(export_format)) AS formats_used,\n",
+          "             CONCAT_WS(', ', slice(array_sort(COLLECT_SET(ip)), 1, 10)) AS source_ips\n",
           "      FROM exports\n",
           "      GROUP BY event_date, actor\n",
           "    ),\n",
           "    baseline AS (\n",
-          "      SELECT * FROM per_user_day\n",
-          "      WHERE event_date < date_sub(current_date(), 2)\n",
+          "      SELECT to_date(b.event_time) AS event_date, b.user_identity.email AS actor,\n",
+          "             COUNT(DISTINCT b.request_params['notebookFullPath']) AS notebooks_exported\n",
+          "      FROM `audit_demo_catalog`.`audit_demo`.`audit` AS b\n",
+          "      WHERE b.action_name = 'workspaceExport'\n",
+          "        AND b.event_time >= timestampadd(DAY, -(2 + 30), :start_time)\n",
+          "        AND b.event_time <  timestampadd(DAY, -2, :start_time)\n",
+          "        AND NOT contains(COALESCE(b.request_params['notebookFullPath'], ''), COALESCE(b.user_identity.email, ' '))\n",
+          "      GROUP BY to_date(b.event_time), b.user_identity.email\n",
           "    ),\n",
           "    per_user_threshold AS (\n",
           "      SELECT\n",
@@ -1273,18 +1328,23 @@
           "      d.event_date,\n",
           "      d.actor,\n",
           "      d.notebooks_exported,\n",
-          "      ROUND(COALESCE(t.user_threshold, CAST(600 AS DOUBLE)), 1),\n",
+          "      ROUND(COALESCE(t.user_threshold, CAST(50 AS DOUBLE)), 1),\n",
           "      ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1),\n",
           "      ROUND(t.median, 1),\n",
           "      d.formats_used,\n",
+          "      d.self_home_new_network,\n",
+          "      d.source_ips,\n",
           "      CONCAT(CAST(d.notebooks_exported AS STRING), ' notebooks exported (threshold ',\n",
-          "             CAST(ROUND(COALESCE(t.user_threshold, CAST(600 AS DOUBLE)), 1) AS STRING),\n",
-          "             ', formats: ', d.formats_used, ')')\n",
+          "             CAST(ROUND(COALESCE(t.user_threshold, CAST(50 AS DOUBLE)), 1) AS STRING),\n",
+          "             ', formats: ', d.formats_used,\n",
+          "             CASE WHEN d.self_home_new_network > 0\n",
+          "                  THEN CONCAT(', ', CAST(d.self_home_new_network AS STRING), ' from own home on a new network') ELSE '' END,\n",
+          "             ')')\n",
           "    FROM per_user_day AS d\n",
           "    LEFT JOIN per_user_threshold AS t ON d.actor = t.actor\n",
-          "    WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(600 AS DOUBLE))\n",
+          "    WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(50 AS DOUBLE))\n",
           "    )\n",
-          ") AS results(event_date, actor, notebooks_exported, threshold_applied, iqrs_from_median, baseline_median, formats_used, analysis)\n"
+          ") AS results(event_date, actor, notebooks_exported, threshold_applied, iqrs_from_median, baseline_median, formats_used, self_home_new_network, source_ips, analysis)\n"
         ],
         "parameters": [
           {
@@ -1307,7 +1367,7 @@
           }
         ],
         "usage_guidance": [
-          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration, and it is deliberately NOT covered by the general download detection, which excludes SOURCE-format exports as normal development -- the exact format bulk code theft uses. Self-exports from a principal own home directory are excluded as platform tooling; first-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration."
+          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. The baseline comes from its own window of baseline_days ending baseline_exclude_days before start_time, so any search window works. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration. Self-exports from a principal own home directory are excluded as platform tooling UNLESS they come from a network the principal did not use in the baseline window and the IP is not Databricks platform egress (self_home_new_network counts those) -- a stolen token emptying its owner home. First-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, exported other users notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration, stolen token exporting a home folder."
         ]
       },
       {
@@ -1320,7 +1380,7 @@
           "FROM (\n",
           "  SELECT\n",
           "      a.source_ip_address AS source_ip,\n",
-          "      COUNT(DISTINCT a.session_id) AS distinct_sessions,\n",
+          "      COUNT(DISTINCT COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id'])) AS distinct_sessions,\n",
           "      COUNT(DISTINCT a.user_identity.email) AS distinct_actors,\n",
           "      CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,\n",
           "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,\n",
@@ -1329,12 +1389,14 @@
           "      COUNT(*) AS events\n",
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
-          "      AND a.session_id IS NOT NULL\n",
-          "      AND NOT a.source_ip_address RLIKE '^(10\\\\..*|192\\\\.168\\\\..*|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\..*)$'\n",
-          "      AND NOT lower(COALESCE(a.user_agent, '')) RLIKE\n",
-          "          'databricks|databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming|rawdbhttpclient|mlflow-python|feature-store'\n",
+          "      -- Token and OAuth logins carry no session_id; count their token / client id as the credential.\n",
+          "      AND COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) IS NOT NULL\n",
+          "      AND NOT a.source_ip_address RLIKE\n",
+          "          '^(10\\\\.|192\\\\.168\\\\.|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\.|100\\\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\\\.|127\\\\.|169\\\\.254\\\\.|(?i)f[cd][0-9a-f]{2}:)'\n",
+          "      AND NOT COALESCE(a.user_agent, '') RLIKE\n",
+          "          'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming|RawDBHttpClient|wsfs/|mlflow-python|feature-store'\n",
           "    GROUP BY a.source_ip_address\n",
-          "    HAVING COUNT(DISTINCT a.session_id) >= 5\n",
+          "    HAVING COUNT(DISTINCT COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id'])) >= 5\n",
           ") AS results(source_ip, distinct_sessions, distinct_actors, actors, user_agents, first_seen, last_seen, events)\n"
         ],
         "parameters": [
@@ -1470,6 +1532,17 @@
           "      a.user_identity.email AS actor,\n",
           "      a.action_name AS action,\n",
           "      COUNT(*) AS downloads,\n",
+          "      COUNT(DISTINCT COALESCE(a.request_params['notebookFullPath'], a.request_params['path'],\n",
+          "                              a.request_params['filePath'], a.request_params['artifactLocation'],\n",
+          "                              a.request_params['request_id'],\n",
+          "                              CONCAT(a.request_params['model_name'], '/', a.request_params['version']),\n",
+          "                              a.event_id)) AS distinct_objects,\n",
+          "      COUNT(DISTINCT CASE\n",
+          "        WHEN lower(regexp_extract(COALESCE(a.request_params['notebookFullPath'], a.request_params['path'], ''),\n",
+          "                                  '^(/Workspace)?/(Users|Repos)/([^/]+)', 3)) NOT IN ('', lower(a.user_identity.email))\n",
+          "        THEN regexp_extract(COALESCE(a.request_params['notebookFullPath'], a.request_params['path'], ''),\n",
+          "                            '^(/Workspace)?/(Users|Repos)/([^/]+)', 3) END) AS foreign_homes,\n",
+          "      CONCAT_WS(', ', COLLECT_SET(a.request_params['workspaceExportFormat'])) AS export_formats,\n",
           "      COUNT(DISTINCT a.source_ip_address) AS distinct_ips,\n",
           "      CONCAT_WS(', ', COLLECT_SET(a.source_ip_address)) AS source_ips,\n",
           "      CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents,\n",
@@ -1478,15 +1551,16 @@
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
           "      AND (\n",
-          "        a.action_name IN ('downloadPreviewResults', 'downloadLargeResults', 'filesGet',\n",
-          "                          'getModelVersionDownloadUri', 'getModelVersionSignedDownloadUri')\n",
-          "        OR (a.action_name = 'workspaceExport'\n",
-          "            AND COALESCE(a.request_params['workspaceExportFormat'], '') <> 'SOURCE')\n",
+          "        a.action_name IN ('downloadPreviewResults', 'downloadLargeResults', 'filesGet', 'createDownloadUrl',\n",
+          "                          'getModelVersionDownloadUri', 'getModelVersionSignedDownloadUri',\n",
+          "                          'readArtifact', 'readTraceData', 'workspaceExport')\n",
           "        OR (a.action_name = 'downloadQueryResult'\n",
           "            AND COALESCE(a.request_params['fileType'], '') <> 'arrows')\n",
+          "        OR (a.action_name = 'generateTemporaryModelVersionCredential'\n",
+          "            AND a.request_params['operation'] = 'READ_MODEL_VERSION')\n",
           "      )\n",
           "    GROUP BY to_date(a.event_time), a.user_identity.email, a.action_name\n",
-          ") AS results(event_date, actor, action, downloads, distinct_ips, source_ips, user_agents, first_seen, last_seen)\n"
+          ") AS results(event_date, actor, action, downloads, distinct_objects, foreign_homes, export_formats, distinct_ips, source_ips, user_agents, first_seen, last_seen)\n"
         ],
         "parameters": [
           {
@@ -1509,7 +1583,7 @@
           }
         ],
         "usage_guidance": [
-          "Data leaving the workspace via download or export, AGGREGATED per actor, action and day: downloadPreviewResults, downloadLargeResults, filesGet, getModelVersionDownloadUri, getModelVersionSignedDownloadUri, workspaceExport (excluding SOURCE format, which is normal source control) and downloadQueryResult (excluding arrows, which is UI rendering). MITRE T1567, TA0010 Exfiltration. Deliberately aggregated, not row-per-event: this is the highest-volume detection here (227,000+ filesGet events from 6 actors in one reference 90-day window), so per-event rows would be unreadable and would truncate. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, result downloads, data leaving the workspace, exfiltration via download, download volume by user."
+          "Data leaving the workspace via download or export, AGGREGATED per actor, action and day: workspaceExport in every format (SOURCE included -- it is what the REST API, CLI and scripted dumps use), filesGet, createDownloadUrl, downloadPreviewResults, downloadLargeResults, downloadQueryResult (excluding arrows, which is UI rendering), getModelVersionDownloadUri, getModelVersionSignedDownloadUri, MLflow readArtifact and readTraceData, and UC model-version read credentials. MITRE T1567, TA0010 Exfiltration. distinct_objects counts distinct notebooks, files, artifacts or model versions; foreign_homes counts OTHER users home folders (/Users/<x>, /Repos/<x>) exported from. Heavy legitimate exporters (CLI sync, CI, scanners) export one home folder; a sweep across several users homes is the exfiltration shape, so sort by foreign_homes, then distinct_objects. Deliberately aggregated, not row-per-event, because this is the highest-volume detection. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, notebook export sweep, exported other users notebooks, result downloads, artifact downloads, data leaving the workspace, exfiltration via download, download volume by user."
         ]
       },
       {
@@ -1524,8 +1598,10 @@
           "      a.event_time,\n",
           "      CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,\n",
           "      a.user_identity.email,\n",
-          "      ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))\n",
-          "             - unix_timestamp(a.event_time)) / 3600 / 24, 0),\n",
+          "      CASE WHEN CAST(a.request_params['tokenExpirationTime'] AS BIGINT) > 0\n",
+          "           THEN ROUND((CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000\n",
+          "                       - unix_timestamp(a.event_time)) / 86400, 2) END,\n",
+          "      COALESCE(CAST(a.request_params['tokenExpirationTime'] AS BIGINT), 0) <= 0,\n",
           "      a.source_ip_address,\n",
           "      a.user_agent,\n",
           "      a.audit_level,\n",
@@ -1534,9 +1610,7 @@
           "    WHERE a.service_name = 'accounts'\n",
           "      AND a.action_name = 'generateDbToken'\n",
           "      AND a.event_time BETWEEN :start_time AND :end_time\n",
-          "      AND ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))\n",
-          "             - unix_timestamp(a.event_time)) / 3600 / 24, 0) > 0\n",
-          ") AS results(event_time, status, actor, token_lifetime_days, source_ip, user_agent, audit_level, request_params)\n"
+          ") AS results(event_time, status, actor, token_lifetime_days, no_expiry, source_ip, user_agent, audit_level, request_params)\n"
         ],
         "parameters": [
           {
@@ -1559,7 +1633,7 @@
           }
         ],
         "usage_guidance": [
-          "Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime."
+          "Personal access tokens (PATs) created, with computed lifetime in days (fractional, so tokens living hours are visible) and a no_expiry flag for tokens created without an expiry -- the most durable credential and the first to review. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, tokens that never expire, generateDbToken, who minted API credentials, token lifetime."
         ]
       },
       {
@@ -1715,6 +1789,8 @@
           "  SELECT\n",
           "      a.event_time,\n",
           "      a.service_name,\n",
+          "      a.action_name,\n",
+          "      CASE WHEN a.request_params['settingTypeName'] IN ('acct_ip_acl_rule', 'acct_ip_acl_enable', 'network_policy', 'network_policy_binding') THEN 'High' ELSE 'Informational' END,\n",
           "      a.request_params['settingName'],\n",
           "      a.request_params['settingKeyName'],\n",
           "      a.request_params['settingValueForAudit'],\n",
@@ -1725,9 +1801,9 @@
           "      a.request_params\n",
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "    WHERE a.audit_level = 'ACCOUNT_LEVEL'\n",
-          "      AND a.action_name = 'setSetting'\n",
+          "      AND a.action_name IN ('setSetting', 'deleteSetting')\n",
           "      AND a.event_time BETWEEN :start_time AND :end_time\n",
-          ") AS results(event_time, service_name, setting_name, setting_key, new_value, setting_type, actor, source_ip, user_agent, request_params)\n"
+          ") AS results(event_time, service_name, action, severity, setting_name, setting_key, new_value, setting_type, actor, source_ip, user_agent, request_params)\n"
         ],
         "parameters": [
           {
@@ -1750,7 +1826,7 @@
           }
         ],
         "usage_guidance": [
-          "Account-level setting changes (setSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. Use for: account level configuration changes, account settings modified, what changed at the account level, setSetting events, account-wide config changes, who changed an account setting."
+          "Account-level setting changes and deletions (setSetting and deleteSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. severity is High for account IP access list and network policy settings (acct_ip_acl_rule, acct_ip_acl_enable, network_policy, network_policy_binding): deleting or loosening them removes network controls everywhere. Use for: account level configuration changes, account settings modified or deleted, what changed at the account level, setSetting, deleteSetting, account IP access list rule deleted, network policy changed, account-wide config changes, who changed an account setting."
         ]
       },
       {
@@ -1767,13 +1843,14 @@
           "      CAST(COUNT(DISTINCT a.action_name) AS INT),\n",
           "      CAST(COUNT(DISTINCT CASE\n",
           "        WHEN a.action_name IN ('createIpAccessList','updateIpAccessList','deleteIpAccessList','IpAccessDenied','accountIpAclsValidationFailed') THEN 'ip_acl'\n",
-          "        WHEN a.action_name IN ('workspaceConfEdit','setSetting') THEN 'config'\n",
-          "        WHEN a.action_name IN ('setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment') THEN 'admin_role'\n",
+          "        WHEN a.action_name IN ('workspaceConfEdit','setSetting','deleteSetting') THEN 'config'\n",
+          "        WHEN a.action_name IN ('setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment','createRole') THEN 'admin_role'\n",
           "        WHEN a.action_name IN ('createGroup','removeGroup','addPrincipalToGroup','addPrincipalsToGroup','updateUser','changePassword','mfaAddKey','mfaDeleteKey') THEN 'identity'\n",
-          "        WHEN a.action_name IN ('generateDbToken','revokeDbToken') THEN 'credential'\n",
-          "        WHEN a.action_name IN ('getSecret','putSecret','listScopes') THEN 'secret'\n",
-          "        WHEN a.action_name IN ('createStorageCredential','updateStorageCredential','mount','updateMetastore') THEN 'storage'\n",
-          "        WHEN a.action_name IN ('downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport') THEN 'data_movement'\n",
+          "        WHEN a.action_name IN ('generateDbToken','revokeDbToken','generateDatabaseCredential') THEN 'credential'\n",
+          "        WHEN a.action_name IN ('getSecret','putSecret','listScopes','listSecrets','listAcls') THEN 'secret'\n",
+          "        WHEN a.action_name IN ('createStorageCredential','updateStorageCredential','mount','updateMetastore','createExternalLocation','updateExternalLocation') THEN 'storage'\n",
+          "        WHEN a.action_name IN ('getInformationSchema','listStorageCredentials','listExternalLocations') THEN 'discovery'\n",
+          "        WHEN a.action_name IN ('downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport','createDownloadUrl') THEN 'data_movement'\n",
           "        ELSE 'other'\n",
           "      END) AS INT),\n",
           "      COUNT(CASE WHEN a.response.status_code <> 200 THEN 1 END),\n",
@@ -1786,13 +1863,14 @@
           "      AND a.user_identity.email IS NOT NULL\n",
           "      AND a.action_name IN (\n",
           "        'createIpAccessList','updateIpAccessList','deleteIpAccessList','IpAccessDenied','accountIpAclsValidationFailed',\n",
-          "        'workspaceConfEdit','setSetting',\n",
-          "        'setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment',\n",
+          "        'workspaceConfEdit','setSetting','deleteSetting',\n",
+          "        'setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment','createRole',\n",
           "        'createGroup','removeGroup','addPrincipalToGroup','addPrincipalsToGroup','updateUser','changePassword','mfaAddKey','mfaDeleteKey',\n",
-          "        'generateDbToken','revokeDbToken',\n",
-          "        'getSecret','putSecret','listScopes',\n",
-          "        'createStorageCredential','updateStorageCredential','mount','updateMetastore',\n",
-          "        'downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport'\n",
+          "        'generateDbToken','revokeDbToken','generateDatabaseCredential',\n",
+          "        'getSecret','putSecret','listScopes','listSecrets','listAcls',\n",
+          "        'createStorageCredential','updateStorageCredential','mount','updateMetastore','createExternalLocation','updateExternalLocation',\n",
+          "        'getInformationSchema','listStorageCredentials','listExternalLocations',\n",
+          "        'downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport','createDownloadUrl'\n",
           "      )\n",
           "    GROUP BY a.user_identity.email, a.source_ip_address\n",
           "    ORDER BY 3 DESC, 5 DESC, 6 DESC\n",
@@ -1834,18 +1912,25 @@
           "  SELECT\n",
           "      to_date(a.event_time) AS event_date,\n",
           "      a.user_identity.email AS actor,\n",
-          "      SUM(CASE WHEN a.action_name = 'listScopes' THEN 1 ELSE 0 END) AS scopes_enumerated,\n",
-          "      SIZE(COLLECT_SET(CONCAT(COALESCE(a.request_params['scope'], ''), ':',\n",
-          "                              COALESCE(a.request_params['key'], '')))) AS secrets_used,\n",
+          "      SUM(CASE WHEN a.action_name IN ('listScopes', 'listSecrets', 'listAcls') THEN 1 ELSE 0 END) AS scopes_enumerated,\n",
+          "      -- Successful reads only: listing calls carry no key (they used to add an empty ':' entry),\n",
+          "      -- and refused reads are not secrets obtained.\n",
+          "      SIZE(COLLECT_SET(CASE WHEN a.action_name = 'getSecret' AND a.response.status_code = 200\n",
+          "                            THEN CONCAT(COALESCE(a.request_params['scope'], ''), ':',\n",
+          "                                        COALESCE(a.request_params['key'], '')) END)) AS secrets_used,\n",
+          "      SUM(CASE WHEN a.response.status_code <> 200 THEN 1 ELSE 0 END) AS secrets_refused,\n",
           "      MAX(a.service_name) AS service_name\n",
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
-          "    WHERE a.action_name IN ('listScopes', 'getSecret')\n",
+          "    -- service_name = 'secrets': Unity Catalog also emits a listSecrets action, with other request_params.\n",
+          "    WHERE a.service_name = 'secrets'\n",
+          "      AND a.action_name IN ('listScopes', 'listSecrets', 'listAcls', 'getSecret')\n",
           "      AND a.event_time BETWEEN :start_time AND :end_time\n",
           "    GROUP BY to_date(a.event_time), a.user_identity.email\n",
-          "    HAVING SUM(CASE WHEN a.action_name = 'listScopes' THEN 1 ELSE 0 END) >= 5\n",
-          "       AND SIZE(COLLECT_SET(CONCAT(COALESCE(a.request_params['scope'], ''), ':',\n",
-          "                                   COALESCE(a.request_params['key'], '')))) >= 5\n",
-          ") AS results(event_date, actor, scopes_enumerated, secrets_used, service_name)\n"
+          "    HAVING SUM(CASE WHEN a.action_name IN ('listScopes', 'listSecrets', 'listAcls') THEN 1 ELSE 0 END) >= 5\n",
+          "       AND SIZE(COLLECT_SET(CASE WHEN a.action_name = 'getSecret' AND a.response.status_code = 200\n",
+          "                                 THEN CONCAT(COALESCE(a.request_params['scope'], ''), ':',\n",
+          "                                             COALESCE(a.request_params['key'], '')) END)) >= 5\n",
+          ") AS results(event_date, actor, scopes_enumerated, secrets_used, secrets_refused, service_name)\n"
         ],
         "parameters": [
           {
@@ -1868,7 +1953,7 @@
           }
         ],
         "usage_guidance": [
-          "Secret discovery behaviour: an identity that both enumerates secret scopes (listScopes) and reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
+          "Secret discovery behaviour: an identity that both enumerates secrets (listScopes, listSecrets or listAcls) and successfully reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Refused secrets calls are returned as secrets_refused for context. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
         ]
       },
       {
@@ -2135,11 +2220,18 @@
           "    FROM `audit_demo_catalog`.`audit_demo`.`audit` AS a\n",
           "    WHERE a.event_time BETWEEN :start_time AND :end_time\n",
           "      AND a.service_name = 'accounts'\n",
-          "      AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin')\n",
+          "      -- Entra (aad*) and OAuth (oidc*, mintOAuthToken) logins are how service principals and\n",
+          "      -- Entra tokens authenticate; without them those identities were invisible.\n",
+          "      AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',\n",
+          "                            'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')\n",
           "      AND a.user_identity.email IS NOT NULL\n",
-          "      AND NOT a.source_ip_address RLIKE '^(10\\\\..*|192\\\\.168\\\\..*|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\..*)$'\n",
-          "      AND NOT lower(COALESCE(a.user_agent, '')) RLIKE\n",
-          "          'databricks|databricks-service/driver|databricks-runtime|delta-sharing-sparkstructuredstreaming|rawdbhttpclient|mlflow-python|feature-store|dbr:'\n",
+          "      -- RFC 1918, CGNAT / Databricks-internal (100.64.0.0/10), loopback, link-local, IPv6 unique-local.\n",
+          "      AND NOT a.source_ip_address RLIKE\n",
+          "          '^(10\\\\.|192\\\\.168\\\\.|172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\.|100\\\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\\\.|127\\\\.|169\\\\.254\\\\.|(?i)f[cd][0-9a-f]{2}:)'\n",
+          "      -- Databricks-internal service clients only, case-sensitive. A bare 'databricks' (and lower())\n",
+          "      -- used to drop databricks-cli, databricks-sdk-* and the SQL connectors -- an actor's own tooling.\n",
+          "      AND NOT COALESCE(a.user_agent, '') RLIKE\n",
+          "          'Databricks-Service/driver|Databricks-Runtime|Delta-Sharing-SparkStructuredStreaming|RawDBHttpClient|wsfs/|mlflow-python|feature-store|dbr:'\n",
           "    GROUP BY a.user_identity.email\n",
           "    HAVING COUNT(DISTINCT a.source_ip_address) >= 5\n",
           ") AS results(actor, distinct_ips, logins, source_ips, user_agents, first_seen, last_seen)\n"
