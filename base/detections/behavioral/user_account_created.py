@@ -61,7 +61,16 @@
 # COMMAND ----------
 
 @detect(output=Output.asDataFrame)
-def user_account_created(earliest:str = None, latest: str = None):
+def user_account_created(earliest:str = None, latest: str = None,
+                         endpoints: list = ["adminConsole", "scim", "autoUserCreation"]):
+    """Identities created in the account.
+
+    endpoints: where the add came from. adminConsole = admin UI, scim = SCIM API (scripts,
+    Terraform, IdP provisioning -- and an attacker with an admin token), autoUserCreation =
+    just-in-time provisioning on first SSO login (logged with a null status). Add
+    "DatabricksApps" to also see the service principals Databricks Apps create for
+    themselves.
+    """
     from pyspark.sql.functions import col, current_date, date_sub, to_date, current_timestamp, expr, when
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 24 hours")
@@ -71,15 +80,18 @@ def user_account_created(earliest:str = None, latest: str = None):
     df_filtered = df.filter(
         (col("service_name") == "accounts") &
         (col("action_name").isin(["add"])) &  
-        (col("response.status_code").cast("int") == 200) &
-        (col("request_params.endpoint") == "adminConsole") &
+        ((col("response.status_code").cast("int") == 200) | col("response.status_code").isNull()) &
+        (col("request_params.endpoint").isin(endpoints)) &
         (col("event_time").between(earliest, latest))  
     ).select(
         col("event_time").alias("EVENT_DATE"),
         col("action_name").alias("ACTION"),
-        when(col("response.status_code") == 200, "Success").otherwise("Failure").alias("STATUS"),
+        when(col("response.status_code") == 200, "Success").when(col("response.status_code").isNull(), "Unknown")
+            .otherwise("Failure").alias("STATUS"),
         col("user_identity.email").alias("SRC_USER"),
         col("request_params.targetUserName").alias("TARGET_USER"),
+        when(col("request_params.targetUserName").rlike(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"),
+             "service_principal").otherwise("user").alias("TARGET_KIND"),
         col("request_params.endpoint").alias("ENDPOINT"),
         col("source_ip_address").alias("SRC_IP"),
         col("user_agent").alias("USER_AGENT"),

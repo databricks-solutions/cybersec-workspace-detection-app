@@ -275,8 +275,10 @@ RETURN
 
 -- --------------------------------------------------------------------------
 -- User account created. Port of behavioral/user_account_created.py.
--- The notebook requires endpoint='adminConsole' AND a 200, i.e. a successful
--- console-driven add rather than any SCIM 'add'.
+-- endpoint adminConsole (UI), scim (API, Terraform, IdP provisioning) or
+-- autoUserCreation (JIT on first SSO login, logged with a NULL status, so a NULL
+-- status is accepted). DatabricksApps -- the SPs Apps create for themselves -- is
+-- left out as platform behaviour.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_user_account_created(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
@@ -286,17 +288,20 @@ RETURNS TABLE (
   event_time  TIMESTAMP COMMENT 'When the account was created (UTC)',
   actor       STRING    COMMENT 'Identity that created it',
   target_user STRING    COMMENT 'Account that was created',
-  endpoint    STRING    COMMENT 'Origin of the request (adminConsole)',
+  target_kind STRING    COMMENT 'user or service_principal (UUID name)',
+  endpoint    STRING    COMMENT 'Origin of the request: adminConsole, scim or autoUserCreation',
   source_ip   STRING    COMMENT 'IP the request came from',
   user_agent  STRING    COMMENT 'Client used',
   audit_level STRING    COMMENT 'ACCOUNT_LEVEL or WORKSPACE_LEVEL'
 )
-COMMENT 'User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user.'
+COMMENT 'User accounts and service principals created in the account, through the admin console, the SCIM API (scripts, Terraform, IdP provisioning, or an attacker holding an admin token) or just-in-time SSO provisioning (autoUserCreation). target_kind says whether a user or a service principal was created. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Service principals that Databricks Apps create for themselves (endpoint DatabricksApps) are not included. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user, new service principal created, SCIM user creation, auto-provisioned users.'
 RETURN
   SELECT
     a.event_time,
     a.user_identity.email,
     a.request_params['targetUserName'],
+    CASE WHEN a.request_params['targetUserName'] RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+         THEN 'service_principal' ELSE 'user' END,
     a.request_params['endpoint'],
     a.source_ip_address,
     a.user_agent,
@@ -304,8 +309,8 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.service_name = 'accounts'
     AND a.action_name = 'add'
-    AND CAST(a.response.status_code AS INT) = 200
-    AND a.request_params['endpoint'] = 'adminConsole'
+    AND (CAST(a.response.status_code AS INT) = 200 OR a.response.status_code IS NULL)
+    AND a.request_params['endpoint'] IN ('adminConsole', 'scim', 'autoUserCreation')
     AND a.event_time BETWEEN start_time AND end_time;
 
 -- --------------------------------------------------------------------------

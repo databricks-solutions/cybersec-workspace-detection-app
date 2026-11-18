@@ -562,7 +562,7 @@
           }
         ],
         "usage_guidance": [
-          "User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user."
+          "User accounts and service principals created in the account, through the admin console, the SCIM API (scripts, Terraform, IdP provisioning, or an attacker holding an admin token) or just-in-time SSO provisioning (autoUserCreation). target_kind says whether a user or a service principal was created. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Service principals that Databricks Apps create for themselves (endpoint DatabricksApps) are not included. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user, new service principal created, SCIM user creation, auto-provisioned users."
         ]
       },
       {
