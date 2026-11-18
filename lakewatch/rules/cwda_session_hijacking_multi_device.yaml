@@ -32,6 +32,16 @@ batch:
           MAX(a.event_time) AS last_seen,
           COUNT(*) AS events
         FROM {{audit_table}} AS a
+        LEFT ANTI JOIN (
+          -- Platform egress: IPs that also carry Databricks-internal authentication in the window
+          -- (cluster-internal PATs, in-house OAuth clients behind Apps / serverless). A user's token
+          -- relayed by a Databricks App shows up from these; they are not a second location.
+          SELECT DISTINCT p.source_ip_address AS ip
+          FROM {{audit_table}} AS p
+          WHERE IN_TIMERANGE(p.event_time)
+            AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+                 OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+        ) AS platform ON a.source_ip_address = platform.ip
         WHERE IN_TIMERANGE(a.event_time)
           AND a.service_name = 'accounts'
           AND a.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
