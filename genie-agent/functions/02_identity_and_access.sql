@@ -36,20 +36,23 @@ RETURNS TABLE (
   event_time          TIMESTAMP COMMENT 'When the token was created (UTC)',
   status              STRING    COMMENT 'Success or Failure',
   actor               STRING    COMMENT 'Identity that created the token',
-  token_lifetime_days DOUBLE    COMMENT 'Days until expiry. Long-lived tokens are the risk',
+  token_lifetime_days DOUBLE    COMMENT 'Days until expiry (2 decimals). NULL when the token never expires',
+  no_expiry           BOOLEAN   COMMENT 'TRUE when the token was created without an expiry -- review first',
   source_ip           STRING    COMMENT 'IP the request came from',
   user_agent          STRING    COMMENT 'Client used -- distinguishes automation from a person',
   audit_level         STRING    COMMENT 'ACCOUNT_LEVEL or WORKSPACE_LEVEL',
   request_params      MAP<STRING, STRING> COMMENT 'Raw payload, for evidence'
 )
-COMMENT 'Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime.'
+COMMENT 'Personal access tokens (PATs) created, with computed lifetime in days (fractional, so tokens living hours are visible) and a no_expiry flag for tokens created without an expiry -- the most durable credential and the first to review. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, tokens that never expire, generateDbToken, who minted API credentials, token lifetime.'
 RETURN
   SELECT
     a.event_time,
     CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,
     a.user_identity.email,
-    ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))
-           - unix_timestamp(a.event_time)) / 3600 / 24, 0),
+    CASE WHEN CAST(a.request_params['tokenExpirationTime'] AS BIGINT) > 0
+         THEN ROUND((CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000
+                     - unix_timestamp(a.event_time)) / 86400, 2) END,
+    COALESCE(CAST(a.request_params['tokenExpirationTime'] AS BIGINT), 0) <= 0,
     a.source_ip_address,
     a.user_agent,
     a.audit_level,
@@ -57,9 +60,7 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.service_name = 'accounts'
     AND a.action_name = 'generateDbToken'
-    AND a.event_time BETWEEN start_time AND end_time
-    AND ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))
-           - unix_timestamp(a.event_time)) / 3600 / 24, 0) > 0;
+    AND a.event_time BETWEEN start_time AND end_time;
 
 -- --------------------------------------------------------------------------
 -- Personal access token revoked. Port of behavioral/access_token_deleted.py.

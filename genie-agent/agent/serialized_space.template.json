@@ -1074,7 +1074,7 @@
           }
         ],
         "usage_guidance": [
-          "Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime."
+          "Personal access tokens (PATs) created, with computed lifetime in days (fractional, so tokens living hours are visible) and a no_expiry flag for tokens created without an expiry -- the most durable credential and the first to review. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, tokens that never expire, generateDbToken, who minted API credentials, token lifetime."
         ]
       },
       {
