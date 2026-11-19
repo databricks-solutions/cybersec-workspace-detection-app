@@ -276,6 +276,11 @@ fixes, and two (bulk notebook export, workspace downloads) add thresholds the pa
    | `secrets_enumeration` | `cwda_secret_scanning_activity` | Counts listSecrets/listAcls, and only reads that succeeded |
    | `configuration_changes_account_level` | `cwda_configuration_changes_account_level` | Also catches `deleteSetting` (for example deleting an account IP access list rule) |
 
+   Also consider leaving the pack's `workspace_content_exported` off. It signals every single workspace export: on our
+   test workspace it returned 186,738 rows in one 12-hour run, during a security scanner's full-workspace scan.
+   `cwda_bulk_notebook_export`, `cwdf_workspace_export_burst` and `cwda_potential_data_movement_workspace_downloads`
+   report the same activity when it crosses per-principal thresholds.
+
 Re-running the deploy is safe. Each rule carries `managed_by` and `content_hash` annotations: unchanged rules are
 skipped, an update touches only the fields this repository owns (suppressions and the enabled state
 stay; *Run as* changes only when you pass `--run-as`), and `--prune` deletes only rules this script created whose file is gone.
