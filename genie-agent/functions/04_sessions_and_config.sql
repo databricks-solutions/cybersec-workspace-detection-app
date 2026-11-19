@@ -97,7 +97,7 @@ RETURNS TABLE (
   last_seen       TIMESTAMP COMMENT 'Last activity (UTC)',
   events          BIGINT    COMMENT 'Logins with this credential'
 )
-COMMENT 'A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs, Databricks service agents and Databricks platform egress (IPs that also carry cluster-internal or in-house OAuth authentication, e.g. a Databricks App relaying the user token) are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly.'
+COMMENT 'A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs, Databricks service agents and Databricks platform egress (IPs that carry cluster-internal or in-house OAuth tokens, or in-house OAuth client sign-ins from a private IP or at service volume (one principal at least 200 times a day), e.g. a Databricks App relaying the user token) are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly.'
 RETURN
   SELECT
     COALESCE(a.session_id, a.request_params['tokenId'], a.request_params['client_id']) AS credential_id,
@@ -112,14 +112,28 @@ RETURN
     COUNT(*) AS events
   FROM system.access.audit AS a
   LEFT ANTI JOIN (
-    -- Platform egress: IPs that also carry Databricks-internal authentication in the window
-    -- (cluster-internal PATs, in-house OAuth clients behind Apps / serverless). A user's token
-    -- relayed by a Databricks App shows up from these; they are not a second location.
-    SELECT DISTINCT p.source_ip_address AS ip
-    FROM system.access.audit AS p
-    WHERE p.event_time BETWEEN start_time AND end_time
-      AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
-           OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+    -- Platform egress: IPs Databricks itself authenticates from. An IP counts when it
+    -- carries a cluster-internal PAT or in-house OAuth token, or the in-house OAuth client
+    -- action (Apps, serverless) from a private address, or that action from a public address
+    -- at service volume: one principal at least 200 times in a day. A laptop calling a
+    -- Databricks App logs the same action from its own IP, far less often (at most 60 a
+    -- day on the reference workspace), so it stays in scope. Looks back 2 days before the
+    -- window so a short window still sees a full day of service traffic.
+    SELECT ip FROM (
+      SELECT p.source_ip_address AS ip, p.user_identity.email AS principal,
+             to_date(p.event_time) AS auth_day,
+             count_if(p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')) AS internal_auth,
+             count_if(p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')) AS inhouse_auth
+      FROM system.access.audit AS p
+      WHERE p.event_time BETWEEN start_time - INTERVAL 2 DAYS AND end_time
+        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+      GROUP BY p.source_ip_address, p.user_identity.email, to_date(p.event_time)
+    ) AS platform_days
+    GROUP BY ip
+    HAVING sum(internal_auth) > 0
+        OR (sum(inhouse_auth) > 0 AND ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])')
+        OR max(inhouse_auth) >= 200
   ) AS platform ON a.source_ip_address = platform.ip
   WHERE a.event_time BETWEEN start_time AND end_time
     AND a.service_name = 'accounts'
@@ -175,14 +189,28 @@ RETURN
     COUNT(*) AS events
   FROM system.access.audit AS a
   LEFT ANTI JOIN (
-    -- Platform egress: IPs that also carry Databricks-internal authentication in the window
-    -- (cluster-internal PATs, in-house OAuth clients behind Apps / serverless). A user's token
-    -- relayed by a Databricks App shows up from these; they are not a second location.
-    SELECT DISTINCT p.source_ip_address AS ip
-    FROM system.access.audit AS p
-    WHERE p.event_time BETWEEN start_time AND end_time
-      AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
-           OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+    -- Platform egress: IPs Databricks itself authenticates from. An IP counts when it
+    -- carries a cluster-internal PAT or in-house OAuth token, or the in-house OAuth client
+    -- action (Apps, serverless) from a private address, or that action from a public address
+    -- at service volume: one principal at least 200 times in a day. A laptop calling a
+    -- Databricks App logs the same action from its own IP, far less often (at most 60 a
+    -- day on the reference workspace), so it stays in scope. Looks back 2 days before the
+    -- window so a short window still sees a full day of service traffic.
+    SELECT ip FROM (
+      SELECT p.source_ip_address AS ip, p.user_identity.email AS principal,
+             to_date(p.event_time) AS auth_day,
+             count_if(p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')) AS internal_auth,
+             count_if(p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')) AS inhouse_auth
+      FROM system.access.audit AS p
+      WHERE p.event_time BETWEEN start_time - INTERVAL 2 DAYS AND end_time
+        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+      GROUP BY p.source_ip_address, p.user_identity.email, to_date(p.event_time)
+    ) AS platform_days
+    GROUP BY ip
+    HAVING sum(internal_auth) > 0
+        OR (sum(inhouse_auth) > 0 AND ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])')
+        OR max(inhouse_auth) >= 200
   ) AS platform ON a.source_ip_address = platform.ip
   WHERE a.event_time BETWEEN start_time AND end_time
     -- Sign-ins only: counting every API call let one person's CLI session read as many credentials.
