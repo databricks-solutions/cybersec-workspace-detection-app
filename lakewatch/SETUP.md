@@ -282,8 +282,19 @@ stay), and `--prune` deletes only rules this script created whose file is gone.
 
 **Check:**
 ```bash
-databricks lakewatch list-rules <lakewatch_catalog> --profile <ws-profile> -o json   # the cwda_* rules, disabled
+databricks lakewatch list-rules <lakewatch_catalog> --profile <ws-profile> -o json   # the 48 cwda_* and cwdf_* rules
 ```
+Each rule gets its own job (**Jobs & Pipelines**, named `lakewatch-rule-batch-...`); its *Run as* is the service
+principal from Step 7. On our test workspace, rules deployed with `--enable` ran once within minutes of being
+created, so check that the first runs succeeded and look at what they found:
+```sql
+SELECT rule_name, severity, count(*) AS signals, max(summary) AS example
+FROM <lakewatch_catalog>.__lakewatch.signals
+WHERE created_at > current_timestamp() - INTERVAL 1 HOUR
+  AND rule_name LIKE '<lakewatch_catalog>.detection.cwd%'   -- rule_name is catalog.schema.rule
+GROUP BY ALL ORDER BY signals DESC
+```
+A failed run shows on the rule's job. The usual cause is a missing grant from Step 7.6.
 
 **Tuning.** Two rules are noisy on workspaces where staff reach Databricks through a corporate egress pool or
 VPN (many addresses for one person): `cwda_session_hijacking_multi_device` and `cwda_session_hijacking_session_count`.
