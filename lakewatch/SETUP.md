@@ -283,7 +283,9 @@ fixes, and two (bulk notebook export, workspace downloads) add thresholds the pa
 
 Re-running the deploy is safe. Each rule carries `managed_by` and `content_hash` annotations: unchanged rules are
 skipped, an update touches only the fields this repository owns (suppressions and the enabled state
-stay; *Run as* changes only when you pass `--run-as`), and `--prune` deletes only rules this script created whose file is gone.
+stay; *Run as* changes only when you pass `--run-as`). `--prune` disables rules this script created whose file is
+gone; `--prune-delete` deletes them. Prefer disabling: deleting a Lakewatch rule also deletes its alerts, so pause a
+rule you want to retire and delete it only after its alerts are no longer needed.
 
 **Check:**
 ```bash

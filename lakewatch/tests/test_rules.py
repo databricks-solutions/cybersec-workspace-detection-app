@@ -103,3 +103,21 @@ def test_output_context(path: Path):
     assert "actor" in out["context"], "every signal names the identity in context.actor"
     for key in re.findall(r"\{(\w+)\}", out["summary"]):
         assert key in {v.strip("{}") for v in out["context"].values()} | set(out["context"]), key
+
+
+def test_deploy_hash_ignores_enabled_state_and_run_as():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lw_deploy", Path(__file__).resolve().parents[1] / "deploy.py")
+    deploy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deploy)
+    rule = {"rule_name": "r", "schedule": {"at_least_every": "1h", "enabled": False}, "batch": {"sql": {"query": "x"}}}
+    moved = {**rule, "schedule": {**rule["schedule"], "enabled": True}, "run_as_principal": "sp-app-id"}
+    assert deploy.content_hash(rule) == deploy.content_hash(moved)
+    assert deploy.content_hash(rule) != deploy.content_hash({**rule, "batch": {"sql": {"query": "y"}}})
+
+
+def test_prune_disables_by_default_and_documents_alert_loss():
+    text = (Path(__file__).resolve().parents[1] / "deploy.py").read_text()
+    assert '"--prune-delete"' in text and "deletes their alerts" in text
+    prune_block = text[text.index("if a.prune or a.prune_delete:"):]
+    assert prune_block.index('"enabled": False') > 0 and "if a.prune_delete:" in prune_block

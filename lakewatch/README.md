@@ -9,7 +9,7 @@ table directly.
 | [`SETUP.md`](SETUP.md) | From a workspace with no Lakewatch to running rules: enablement, a locked-down environment, the run-as service principal, the Content library rules, this folder's rules, and investigation with Genie. Start here. |
 | `rules/` | 48 rule files: 21 generated from this repository's detections (`cwda_*`) and 27 attack-family rules (`cwdf_*`) |
 | `templates/` | A rule that needs data outside system tables (cloud storage access logs); copy it into `rules/` once that data is ingested |
-| `deploy.py` | Validates and deploys the rules (idempotent; `--dry-run`, `--prune`, `--run-as`) |
+| `deploy.py` | Validates and deploys the rules (idempotent; `--dry-run`, `--prune` disables orphans, `--prune-delete`, `--run-as`) |
 | `tools/build_rules.py` | Regenerates `rules/` from `genie-agent/functions/` and the notebooks' metadata |
 | `tests/` | Rule checks (up to date with the detections, `IN_TIMERANGE` window, placeholders, MITRE, context keys) and `fixtures/`: synthetic audit rows with planted attacks and near misses for every family rule |
 | `tools/try_fixtures.py`, `tools/backtest.py` | Run a rule on its fixture (true positives), or over its last N runs on your real audit table (noise), read-only |
