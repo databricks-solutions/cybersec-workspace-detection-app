@@ -38,7 +38,7 @@ batch:
                a.event_time,
                a.user_agent
         FROM {{audit_table}} AS a
-        WHERE a.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time <= TIMERANGE_NOW()
+        WHERE a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
           AND a.response.status_code = 200
           AND a.action_name IN ('tokenLogin', 'oidcTokenAuthorization', 'mintOAuthToken', 'aadTokenLogin',
                                 'workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')

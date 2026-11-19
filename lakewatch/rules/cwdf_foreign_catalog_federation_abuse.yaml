@@ -45,7 +45,7 @@ batch:
         SELECT DISTINCT y.user_identity.email AS actor
         FROM {{audit_table}} AS y
         WHERE y.service_name = 'unityCatalog' AND y.action_name = 'createCatalog'
-          AND y.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND y.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
+          AND y.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND y.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
       ),
       churn AS (
         SELECT coalesce(d.deleted, c.created) AS event_time, c.actor, c.src_ip, c.catalog, c.connection,

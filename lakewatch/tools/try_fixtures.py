@@ -11,13 +11,15 @@ Each lakewatch/tests/fixtures/<rule_name>.yaml has:
     rows:            # synthetic system.access.audit rows; t = minutes relative to the run's end (anchor)
       - {t: -30, action_name: tokenLogin, service_name: accounts, email: a@x.com, ip: 198.51.100.7,
          user_agent: curl/8.4.0, status: 200, request_params: {tokenId: tok1, authenticationMethod: API_EXT_PAT_TOKEN}}
+      - {t: -600, action_name: workspaceInHouseOAuthClientAuthentication, email: app-sp, ip: 203.0.113.9,
+         repeat: 250}                                     # repeat: N emits the row N times (same timestamp)
     expect:
       hits:   [{actor: a@x.com, src_ip: 198.51.100.7}]   # each must match at least one output row
       misses: [{actor: b@x.com}]                         # none may match an output row
 
 A row matches when every key/value given equals the output column of that name (as strings). The rule
-runs as one Lakewatch run ending at the anchor: IN_TIMERANGE(x) becomes (x > anchor - window AND
-x <= anchor) with window = schedule + extend_lookback, and TIMERANGE_NOW() becomes the anchor, the
+runs as one Lakewatch run ending at the anchor: IN_TIMERANGE(x) becomes (x >= anchor - window AND
+x < anchor), half-open like the platform, with window = schedule + extend_lookback, and TIMERANGE_NOW() becomes the anchor, the
 same rewrite the demo's `auditdemo try-rule` uses. Nothing is written anywhere; the rows exist only
 inside the statement.
 """
@@ -57,7 +59,7 @@ def rewrite(sql: str, anchor: datetime, window: timedelta) -> str:
             depth += {"(": 1, ")": -1}.get(sql[j], 0)
             j += 1
         e = sql[m.end():j - 1].strip()
-        out += [sql[i:m.start()], f"({e} > {lo} AND {e} <= {hi})"]
+        out += [sql[i:m.start()], f"({e} >= {lo} AND {e} < {hi})"]
         i = j
     out.append(sql[i:])
     return re.sub(r"\bTIMERANGE_NOW\s*\(\s*\)", hi, "".join(out), flags=re.I)
@@ -89,6 +91,7 @@ def row_sql(r: dict, anchor: datetime) -> str:
         f"'acting_resource', CAST(NULL AS STRING), 'acting_resource_type', CAST(NULL AS STRING)) AS identity_metadata, "
         f"uuid() AS event_id, {lit(r.get('account_id', 'acct'))} AS account_id, "
         f"{lit(r['request_id']) if r.get('request_id') else 'uuid()'} AS request_id"
+        + (f" FROM range({int(r['repeat'])})" if r.get("repeat") else "")
     )
 
 

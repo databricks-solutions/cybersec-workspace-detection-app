@@ -40,7 +40,7 @@ batch:
                     WHEN a.action_name IN ('listRepos', 'listGitCredentials') THEN 'repos'
                     WHEN a.action_name = 'workspaceExport' THEN 'export' END AS family
         FROM {{audit_table}} AS a
-        WHERE a.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time <= TIMERANGE_NOW()
+        WHERE a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
           AND a.user_identity.email IS NOT NULL AND a.user_identity.email <> 'System-User'
           AND a.action_name IN ('listScopes', 'listSecrets', 'getSecret', 'listAcls', 'listStorageCredentials',
                                 'getStorageCredential', 'listExternalLocations', 'listConnections', 'getConnection',
@@ -54,7 +54,7 @@ batch:
       sign_in_ips AS (
         SELECT DISTINCT l.user_identity.email AS actor, l.source_ip_address AS src_ip
         FROM {{audit_table}} AS l
-        WHERE l.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND l.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
+        WHERE l.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND l.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
           AND l.user_identity.email IN (SELECT actor FROM actors)
           AND l.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
                                 'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')

@@ -1,5 +1,8 @@
 # Planted: an SP runs 3 commands on a production cluster from a new public IP with python-requests.
-# Near misses: an IDE plugin from its usual IP; a call from a private IP.
+# Planted: a user whose laptop also calls a Databricks App (in-house OAuth sign-ins from its own IP, at
+# laptop volume) runs commands with curl from that IP; the App traffic must not make it platform egress.
+# Near misses: an IDE plugin from its usual IP; a call from a private IP; a command from a public IP that
+# carries in-house OAuth sign-ins at service volume (Apps / serverless egress).
 rows:
 - t: -14400
   service_name: data-plane-router
@@ -55,12 +58,45 @@ rows:
   request_params:
     cluster_id: c2
     language: python
+- t: -300
+  action_name: workspaceInHouseOAuthClientAuthentication
+  email: laptop@corp.example
+  ip: 198.51.100.77
+  user_agent: python-requests/2.33
+  repeat: 20
+- t: -15
+  service_name: data-plane-router
+  action_name: commandExecute
+  email: laptop@corp.example
+  ip: 198.51.100.77
+  user_agent: curl/8.4.0
+  request_params:
+    cluster_id: c3
+    language: python
+- t: -600
+  action_name: workspaceInHouseOAuthClientAuthentication
+  email: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+  ip: 203.0.113.200
+  user_agent: python-requests/2.32
+  repeat: 250
+- t: -10
+  service_name: data-plane-router
+  action_name: commandExecute
+  email: 11111111-2222-3333-4444-555555555555
+  ip: 203.0.113.200
+  user_agent: python-requests/2.32
+  request_params:
+    cluster_id: c4
+    language: python
 expect:
   hits:
   - actor: 55555555-6666-7777-8888-999999999999
     commands: 3
     raw_http_client: 'true'
     actor_kind: sp
+  - actor: laptop@corp.example
+    src_ip: 198.51.100.77
   misses:
   - actor: ide@corp.example
   - actor: job@corp.example
+  - actor: 11111111-2222-3333-4444-555555555555

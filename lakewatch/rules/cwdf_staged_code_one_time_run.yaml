@@ -29,7 +29,7 @@ batch:
         SELECT a.user_identity.email AS actor, a.source_ip_address AS src_ip, a.service_name, a.action_name, a.event_time,
                a.user_agent
         FROM {{audit_table}} AS a
-        WHERE a.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time <= TIMERANGE_NOW()
+        WHERE a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
           AND ((a.service_name = 'notebook' AND a.action_name IN ('importNotebook', 'deleteNotebook'))
                OR (a.service_name = 'dbfs' AND a.action_name = 'put')
                OR (a.service_name = 'workspace' AND a.action_name IN ('import', 'delete'))

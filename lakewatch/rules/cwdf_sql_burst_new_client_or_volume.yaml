@@ -35,7 +35,7 @@ batch:
                count_if(lower(statement_text) RLIKE 'pmod\\s*[(]\\s*(xx)?hash(64)?[(]') AS hash_shards,
                max(start_time) AS last_time
         FROM system.query.history
-        WHERE start_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND start_time <= TIMERANGE_NOW()
+        WHERE start_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND start_time < TIMERANGE_NOW()
           AND executed_by IS NOT NULL
           -- this rule's own text is not a bulk dump
           AND lower(coalesce(statement_text, '')) NOT LIKE '%hash_shards%'

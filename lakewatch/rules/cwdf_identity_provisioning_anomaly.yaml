@@ -48,7 +48,7 @@ batch:
       seen AS (
         SELECT DISTINCT s.source_ip_address AS ip
         FROM {{audit_table}} AS s
-        WHERE s.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND s.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
+        WHERE s.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND s.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
           AND s.service_name = 'accounts'
           AND s.action_name IN ('login', 'tokenLogin', 'samlLogin', 'jwtLogin', 'aadTokenLogin', 'oidcTokenAuthorization',
                                 'aadBrowserLogin', 'oidcBrowserLogin', 'mintOAuthToken')

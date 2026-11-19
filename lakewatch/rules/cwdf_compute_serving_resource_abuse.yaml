@@ -25,7 +25,7 @@ batch:
       WITH gpu AS (
         SELECT a.user_identity.email AS actor, a.event_time, a.source_ip_address AS src_ip, a.action_name
         FROM {{audit_table}} AS a
-        WHERE a.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time <= TIMERANGE_NOW()
+        WHERE a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
           AND a.response.status_code = 200
           AND ((a.service_name = 'clusters' AND a.action_name = 'create'
                 AND (coalesce(a.request_params['spark_version'], '') LIKE '%gpu%'
@@ -46,7 +46,7 @@ batch:
         SELECT requester AS actor, to_date(request_time) AS day, count(*) AS reqs,
                count(DISTINCT served_entity_id) AS endpoints, max(request_time) AS last_time
         FROM system.serving.endpoint_usage
-        WHERE request_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND request_time <= TIMERANGE_NOW()
+        WHERE request_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND request_time < TIMERANGE_NOW()
         GROUP BY requester, to_date(request_time)
       ),
       med AS (

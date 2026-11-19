@@ -27,7 +27,7 @@ batch:
         SELECT l.created_by AS actor, l.source_table_full_name AS table_read, l.event_time
         FROM system.access.table_lineage AS l
         WHERE l.source_table_full_name = 'system.access.audit'
-          AND l.event_time > TIMERANGE_NOW() - INTERVAL 92 DAYS AND l.event_time <= TIMERANGE_NOW()
+          AND l.event_time >= TIMERANGE_NOW() - INTERVAL 92 DAYS AND l.event_time < TIMERANGE_NOW()
           AND l.created_by IS NOT NULL
       )
       SELECT max(r.event_time) AS event_time, r.actor AS actor,

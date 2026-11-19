@@ -35,7 +35,7 @@ batch:
           AND a.action_name IN ('listCatalogs', 'listSchemas', 'listTables', 'listTableSummaries', 'getTable',
                                 'getInformationSchema', 'listStorageCredentials', 'listExternalLocations')
           AND a.user_identity.email IS NOT NULL AND a.user_identity.email <> 'System-User'
-          AND a.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time <= TIMERANGE_NOW()
+          AND a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
       ),
       buckets AS (
         SELECT actor, window(event_time, '15 minutes').start AS bucket,
