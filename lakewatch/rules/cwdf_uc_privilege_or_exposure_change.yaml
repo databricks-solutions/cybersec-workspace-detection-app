@@ -11,7 +11,8 @@ objective: >-
   Each of these is rare and change-managed in normal operation. In the run window the rule reports updateMetastore
   changing external_access_enabled; updatePermissions whose changes include EXTERNAL_USE (which lets outside engines
   vend credentials), ALL_PRIVILEGES or MANAGE, or 'account users'; createShare and createRecipient (refused attempts
-  included); and Lakebase createRole/updateRole requesting DATABRICKS_SUPERUSER or bypassrls, or refused. An event
+  included); and Lakebase createRole/updateRole requesting DATABRICKS_SUPERUSER or bypassrls, or refused.
+  Databricks-internal control-plane services and grants on the Databricks-managed system catalog are excluded. An event
   feed: escalate when temporary credential vending or new-client reads of the securable follow. False positives:
   planned platform changes (match them to change tickets).
 mitre:
@@ -38,6 +39,10 @@ batch:
              coalesce(a.request_params['securable_full_name'], a.request_params['name'], a.request_params['full_name_arg']) AS securable
       FROM {{audit_table}} AS a
       WHERE IN_TIMERANGE(a.event_time)
+        -- Databricks-internal control-plane services (they manage default grants on their own objects)
+        AND NOT coalesce(a.user_agent, '') RLIKE 'Databricks-Service/driver|DBHttpClient/controlPlaneClient'
+        -- grants on the Databricks-managed system catalog
+        AND NOT coalesce(a.request_params['securable_full_name'], a.request_params['full_name_arg'], '') RLIKE '^system([.]|$)'
         AND ((a.service_name = 'unityCatalog' AND a.action_name = 'updateMetastore'
               AND a.request_params['external_access_enabled'] IS NOT NULL)
              OR (a.service_name = 'unityCatalog' AND a.action_name IN ('createShare', 'createRecipient'))

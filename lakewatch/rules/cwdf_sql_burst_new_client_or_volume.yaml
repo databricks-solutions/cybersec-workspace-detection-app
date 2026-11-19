@@ -13,7 +13,8 @@ objective: >-
   the 30 days before (for example the Statement Execution API from curl or urllib where its history is a JDBC/ODBC
   driver or a BI tool); more statements than both 500 and 10 times its 99th-percentile hour; at least 20 statements
   returning more rows than 10 times its 99th-percentile hour; or at least 10 hash-sharded statements
-  (pmod(xxhash64(...))), a bulk-dump pattern. Statement text is only counted, never returned. query.history has no
+  (pmod(xxhash64(...))), a bulk-dump pattern. All arms but the last need at least 7 days of history for the
+  principal: a new principal's first runs have no baseline. Statement text is only counted, never returned. query.history has no
   source IP; correlate with the principal's token logins in the same minutes. False positives: a new BI tool or
   driver; a backfill job.
 mitre:
@@ -44,7 +45,8 @@ batch:
         SELECT executed_by, percentile(statements, 0.99) AS p99_statements, percentile(rows_out, 0.99) AS p99_rows
         FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS GROUP BY executed_by
       ),
-      c AS (SELECT DISTINCT executed_by, client FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS)
+      c AS (SELECT DISTINCT executed_by, client FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS),
+      aged AS (SELECT executed_by FROM h GROUP BY executed_by HAVING min(hr) < TIMERANGE_NOW() - INTERVAL 7 DAYS)
       SELECT h.last_time AS event_time, h.executed_by AS actor,
              CASE WHEN h.executed_by RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
              h.client AS client, h.hr AS hr, h.statements AS statements, h.warehouses AS warehouses,
@@ -54,9 +56,9 @@ batch:
       LEFT JOIN p ON p.executed_by = h.executed_by
       LEFT JOIN c ON c.executed_by = h.executed_by AND c.client = h.client
       WHERE IN_TIMERANGE(h.last_time)
-        AND ((c.client IS NULL AND h.statements >= 20)
-             OR h.statements > greatest(500, 10 * coalesce(p.p99_statements, 0))
-             OR (h.rows_out > 10 * coalesce(p.p99_rows, 0) AND h.statements >= 20)
+        AND ((c.client IS NULL AND h.statements >= 20 AND h.executed_by IN (SELECT executed_by FROM aged))
+             OR (h.executed_by IN (SELECT executed_by FROM aged) AND h.statements > greatest(500, 10 * coalesce(p.p99_statements, 0)))
+             OR (h.executed_by IN (SELECT executed_by FROM aged) AND h.rows_out > 10 * coalesce(p.p99_rows, 0) AND h.statements >= 20)
              OR h.hash_shards >= 10)
 output:
   summary: '{actor}: {statements} statements through {client} (new client: {new_client}), {rows_out} rows, {hash_shards} hash-sharded'

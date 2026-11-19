@@ -2,16 +2,17 @@ catalog_name: '{{catalog}}'
 schema_name: '{{schema}}'
 rule_name: cwdf_suspicious_client_user_agent
 description: A client user agent that does not belong on the credential -- a browser on a PAT or service principal
-  token login, a browser or raw HTTP client on an OAuth client-credentials mint, or a known offensive tool.
+  token login, a browser or curl on an OAuth client-credentials mint, or a known offensive tool.
 severity: Medium
 category: Static Signature
 fidelity: FIDELITY_HIGH
 objective: >-
   Machine credentials used by the wrong client. Browsers do not perform client_credentials grants or carry PATs, so a
-  browser string there is a spoof or a human holding a machine secret; real M2M workloads use an SDK. In the run
+  browser string there is a spoof or a human holding a machine secret; real M2M workloads use an SDK or a script. In the run
   window the rule reports: a known offensive or scanning tool user agent (trufflehog, gitleaks, nuclei, sqlmap,
   kali, nmap, masscan, zgrab, a self-labelled recon/probe string); mintOAuthToken with grant_type
-  client_credentials from Mozilla, curl, Python-urllib or python-requests; and a browser user agent on at least 5
+  client_credentials from a browser or curl (scripts on python-requests or urllib are common for M2M and are covered by
+  cwdf_credential_new_network_and_client when the client is new for the principal); and a browser user agent on at least 5
   external PAT logins, or on a service principal token login. False positives: a BI/ETL connector or script that
   copies a browser user agent; the customer's own red team or sanctioned scans.
 mitre:
@@ -32,7 +33,7 @@ batch:
                          '(trufflehog|gitleaks|nuclei|sqlmap|kali|nmap|masscan|zgrab|\\brecon\\b|\\bprobe\\b)'
                       THEN 'offensive_tool'
                     WHEN a.action_name = 'mintOAuthToken' AND a.request_params['grant_type'] = 'client_credentials'
-                         AND a.user_agent RLIKE '(?i)^(Mozilla/|curl/|python-urllib/|python-requests/)'
+                         AND a.user_agent RLIKE '(?i)^(Mozilla/|curl/)'
                       THEN 'non_sdk_m2m_mint'
                     WHEN a.action_name = 'tokenLogin' AND a.request_params['authenticationMethod'] = 'API_EXT_PAT_TOKEN'
                          AND a.user_agent LIKE 'Mozilla/%' THEN 'browser_ua_on_pat'
