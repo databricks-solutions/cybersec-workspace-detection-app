@@ -239,7 +239,8 @@ and (2) sets classification + state and assigns the alert to you — approve onl
 
 ## Step 9 — Deploy this repository's rules
 
-`lakewatch/rules/` holds 21 rules generated from this repository's detections (`cwda_*`). 15 cover detections the
+`lakewatch/rules/` holds 48 rules: 21 generated from this repository's detections (`cwda_*`) and 27 attack-family
+rules (`cwdf_*`, see [README](README.md#attack-family-rules-cwdf_)). Of the `cwda_*` rules, 15 cover detections the
 Content library does not have (session hijacking, token scanning, encoded commands, non-SSO logins, admin role
 grants, data movement, and more). Four replace Content library rules whose logic has a bug that this repository
 fixes, and two (bulk notebook export, workspace downloads) add thresholds the pack does not have.
@@ -255,8 +256,10 @@ fixes, and two (bulk notebook export, workspace downloads) add thresholds the pa
    uv run lakewatch/deploy.py --profile <ws-profile> --catalog <lakewatch_catalog> --schema detection \
      --warehouse-id <warehouse-id> --run-as <sp-application-id>
    ```
-4. Back-test before you enable. In Lakewatch **Query**, paste a rule's SQL (from its YAML file, with `{{audit_table}}`
-   replaced by `system.access.audit`), pick the last 7 days, and look at what it returns. A rule that returns many
+4. Back-test before you enable: `uv run lakewatch/tools/backtest.py --profile <ws-profile> --warehouse-id <warehouse-id>
+   --windows 24 --show 5` prints what each rule would have returned in its last 24 runs on your audit table (read-only).
+   Or, in Lakewatch **Query**, paste a rule's SQL (with `{{audit_table}}` replaced by `system.access.audit`) and pick a
+   time range. A rule that returns many
    rows of known-good activity needs tuning for your environment first (see *Tuning* below).
 5. Enable the rules you reviewed, in the UI (**Detection rules** → rule → *Rule active*) or with
    `--enable --only cwda_<name>,cwda_<name>`.
