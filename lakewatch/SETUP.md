@@ -181,9 +181,13 @@ databricks permissions update warehouses <warehouse-id> --profile <ws-profile> -
 GRANT USE CATALOG ON CATALOG system TO `<sp-application-id>`;
 GRANT USE SCHEMA  ON SCHEMA  system.access TO `<sp-application-id>`;
 GRANT SELECT      ON TABLE   system.access.audit TO `<sp-application-id>`;
+GRANT SELECT      ON TABLE   system.access.table_lineage TO `<sp-application-id>`;  -- cwdf_audit_log_self_read
 GRANT USE SCHEMA  ON SCHEMA  system.query TO `<sp-application-id>`;
-GRANT SELECT      ON TABLE   system.query.history TO `<sp-application-id>`;   -- one detection uses this
+GRANT SELECT      ON TABLE   system.query.history TO `<sp-application-id>`;  -- 5 rules (SQL text and clients)
+GRANT USE SCHEMA  ON SCHEMA  system.serving TO `<sp-application-id>`;
+GRANT SELECT      ON TABLE   system.serving.endpoint_usage TO `<sp-application-id>`;  -- cwdf_compute_serving_resource_abuse
 ```
+Every system table a rule reads is listed here; `tests/test_rules.py` fails if a rule reads one that is not.
 **Check:** after Step 9, open one rule's job run (**Jobs & Pipelines** → the rule's job) and confirm it ran as the
 service principal and succeeded.
 

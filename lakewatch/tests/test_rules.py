@@ -71,6 +71,19 @@ def test_query_uses_the_run_window(path: Path):
         "read {{audit_table}} so the rule can run on a test table"
 
 
+def test_setup_grants_every_system_table_the_rules_read():
+    """SETUP.md step 7.6 grants the run-as service principal SELECT on each system table a rule reads;
+    a rule that reads one more would fail at run time under the service principal."""
+    read = set()
+    for p in RULES:
+        query = load(p)["batch"]["sql"]["query"]
+        read |= {m.lower() for m in re.findall(r"\b(?:FROM|JOIN)\s+(system\.\w+\.\w+)", query, re.I)}
+    read.add("system.access.audit")  # every rule reads it through {{audit_table}}
+    setup = (ROOT / "lakewatch" / "SETUP.md").read_text()
+    granted = {m.lower() for m in re.findall(r"GRANT SELECT\s+ON TABLE\s+(system\.\w+\.\w+)", setup)}
+    assert read <= granted, f"add GRANTs to SETUP.md step 7.6 for: {sorted(read - granted)}"
+
+
 @pytest.mark.parametrize("path", RULES, ids=lambda p: p.stem)
 def test_mitre_mapping(path: Path):
     for m in load(path).get("mitre") or []:
