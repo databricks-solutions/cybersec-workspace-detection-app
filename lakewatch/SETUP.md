@@ -277,8 +277,8 @@ fixes, and two (bulk notebook export, workspace downloads) add thresholds the pa
    | `configuration_changes_account_level` | `cwda_configuration_changes_account_level` | Also catches `deleteSetting` (for example deleting an account IP access list rule) |
 
 Re-running the deploy is safe. Each rule carries `managed_by` and `content_hash` annotations: unchanged rules are
-skipped, an update touches only the fields this repository owns (your *Run as*, suppressions and enabled state
-stay), and `--prune` deletes only rules this script created whose file is gone.
+skipped, an update touches only the fields this repository owns (suppressions and the enabled state
+stay; *Run as* changes only when you pass `--run-as`), and `--prune` deletes only rules this script created whose file is gone.
 
 **Check:**
 ```bash

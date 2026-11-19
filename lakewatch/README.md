@@ -26,7 +26,8 @@ uv run lakewatch/deploy.py --profile <ws-profile> --catalog <lakewatch_catalog> 
   --warehouse-id <warehouse-id> --run-as <sp-application-id>
 ```
 
-Rules are created disabled. Back-test each on the Lakewatch Query page, then enable the ones you want.
+Rules are created disabled. Back-test them on your audit table with `uv run lakewatch/tools/backtest.py` (read-only;
+SETUP.md step 9), then enable the ones you want.
 
 ## How the rules relate to the rest of the repository
 
