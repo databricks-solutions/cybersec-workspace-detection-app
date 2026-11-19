@@ -1,0 +1,112 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_workspace_export_burst
+description: Workspace exports across other users' home folders, of credential-shaped files, or in bulk from a source
+  that never exported.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_HIGH
+objective: >-
+  Source-code and embedded-credential theft. Attackers with a stolen token pull code and configuration wholesale to
+  look for embedded credentials; owners export their own work. Per principal and source IP in the run window, over
+  successful workspaceExport in any format (SOURCE included), the rule reports any of: exports from at least 3 other
+  users' home folders (/Users/<x>/ or /Repos/<x>/); a credential-shaped file (.env, .tfstate, .pem, .key, id_rsa,
+  .npmrc, .git/config, .mcp_servers.json, credentials, secrets.json/yaml/toml) exported from another user's home by
+  a non-browser client; or at least 20 distinct paths from a public IP (not Databricks platform egress) the principal
+  never exported from in the 30 days before. False positives: an admin exporting a leaver's folder, a deploy identity
+  reading another user's .env, a new backup job.
+mitre:
+- {taxonomy: Enterprise, tactic: Collection, technique_id: T1213, technique: Data from Information Repositories}
+- {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
+- {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1552, technique: Unsecured Credentials,
+   sub_technique_id: T1552.001, sub_technique: Credentials In Files}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH platform_ips AS (
+        -- Platform egress: IPs Databricks itself authenticates from. An IP counts when it carries a
+        -- cluster-internal PAT or in-house OAuth token, or the in-house OAuth client action (Apps,
+        -- serverless) from a private address, or that action from a public address at service volume:
+        -- one principal at least 200 times in a day. A laptop calling a Databricks App logs the same
+        -- action from its own IP, far less often, so it stays in scope. Two days back, so a full day
+        -- of service traffic is always in view.
+        SELECT ip FROM (
+          SELECT p.source_ip_address AS ip, p.user_identity.email AS principal, to_date(p.event_time) AS auth_day,
+                 count_if(p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')) AS internal_auth,
+                 count_if(p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')) AS inhouse_auth
+          FROM {{audit_table}} AS p
+          WHERE p.event_time >= TIMERANGE_NOW() - INTERVAL 2 DAYS AND p.event_time < TIMERANGE_NOW()
+            AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+                 OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+          GROUP BY p.source_ip_address, p.user_identity.email, to_date(p.event_time)
+        ) AS platform_days
+        GROUP BY ip
+        HAVING sum(internal_auth) > 0
+            OR (sum(inhouse_auth) > 0 AND ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])')
+            OR max(inhouse_auth) >= 200
+      ),
+      e AS (
+        SELECT a.user_identity.email AS actor, a.source_ip_address AS src_ip, a.user_agent, a.event_time,
+               a.request_params['notebookFullPath'] AS path,
+               lower(regexp_extract(coalesce(a.request_params['notebookFullPath'], ''),
+                                    '^(/Workspace)?/(Users|Repos)/([^/]+)', 3)) AS home_owner
+        FROM {{audit_table}} AS a
+        WHERE a.action_name = 'workspaceExport' AND a.response.status_code = 200
+          AND a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
+          AND a.user_identity.email IS NOT NULL
+      ),
+      hist AS (
+        SELECT DISTINCT actor, src_ip FROM e WHERE event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
+      ),
+      scored AS (
+        SELECT w.actor, w.src_ip,
+               count(DISTINCT w.path) AS paths,
+               count(DISTINCT CASE WHEN w.home_owner <> '' AND w.home_owner <> lower(w.actor) THEN w.home_owner END) AS other_homes,
+               count(DISTINCT CASE WHEN w.home_owner <> '' AND w.home_owner <> lower(w.actor)
+                                    AND NOT coalesce(w.user_agent, '') LIKE 'Mozilla/%'
+                                    AND lower(w.path) RLIKE
+                                        '(/[.]env([.]|$)|[.]mcp_servers[.]json|[.]tfstate|[.]npmrc|[.]git/config|[.]pem$|id_rsa|[.]key$|credentials|secrets?[.](json|ya?ml|toml))'
+                                   THEN w.path END) AS credential_paths,
+               max(h.actor IS NULL AND pi.ip IS NULL AND w.src_ip IS NOT NULL AND NOT w.src_ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])') AS new_source,
+               concat_ws(', ', slice(array_sort(collect_set(CASE WHEN w.home_owner <> lower(w.actor) THEN w.home_owner END)), 1, 10)) AS homes,
+               concat_ws(', ', slice(array_sort(collect_set(w.user_agent)), 1, 5)) AS user_agents,
+               min(w.event_time) AS first_time, max(w.event_time) AS event_time
+        FROM e AS w
+        LEFT JOIN hist AS h ON h.actor = w.actor AND h.src_ip = w.src_ip
+        LEFT JOIN platform_ips AS pi ON pi.ip = w.src_ip
+        WHERE IN_TIMERANGE(w.event_time)
+        GROUP BY w.actor, w.src_ip
+      )
+      SELECT event_time, actor,
+             CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             src_ip, paths, other_homes, credential_paths, new_source, homes, user_agents, first_time
+      FROM scored
+      WHERE other_homes >= 3 OR credential_paths >= 1 OR (paths >= 20 AND new_source)
+output:
+  summary: '{actor} exported {paths} paths from {src_ip}: {other_homes} other homes, {credential_paths} credential-shaped files'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    paths: '{paths}'
+    other_homes: '{other_homes}'
+    credential_paths: '{credential_paths}'
+    new_source: '{new_source}'
+    homes: '{homes}'
+    user_agents: '{user_agents}'
+    first_time: '{first_time}'
+  default_context: false
+runbook: |
+  1. Is the export explained (offboarding, migration, backup, or a security scanner that reads every notebook's
+     source on a schedule)? Ask the actor or its owner.
+  2. List the exported paths (workspaceExport by actor from src_ip) and look for embedded credentials in them.
+  3. Rotate any credential found in exported files; revoke the actor's token if the export is not explained.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: workspace_export_burst_new_source_or_cross_user

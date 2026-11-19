@@ -1,0 +1,82 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_staged_code_one_time_run
+description: Code staged and run once from a new source -- import or upload, a one-time run or a create-and-run job,
+  then the run output fetched or the code deleted, by one principal and IP with no run history from that IP.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  How actors run code on customer compute without the Command Execution API: import a notebook or upload a script,
+  submit a one-time run (or create and run a job), read the result through getRunOutput, and delete the evidence.
+  Per principal and public source IP in the run window, the rule reports at least one run (submitRun, runNow) with
+  staging (importNotebook, workspace import, dbfs put) or a job creation, and an output read or a delete, when the
+  principal never submitted a run from that IP in the 30 days before. CI/CD also imports and runs, but from fixed
+  runner egress with a long history. False positives: a developer's first deployment from a new network; new CI
+  runners.
+mitre:
+- {taxonomy: Enterprise, tactic: Execution, technique_id: T1651, technique: Cloud Administration Command}
+- {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1070, technique: Indicator Removal}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH s AS (
+        SELECT a.user_identity.email AS actor, a.source_ip_address AS src_ip, a.service_name, a.action_name, a.event_time,
+               a.user_agent
+        FROM {{audit_table}} AS a
+        WHERE a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
+          AND ((a.service_name = 'notebook' AND a.action_name IN ('importNotebook', 'deleteNotebook'))
+               OR (a.service_name = 'dbfs' AND a.action_name = 'put')
+               OR (a.service_name = 'workspace' AND a.action_name IN ('import', 'delete'))
+               OR (a.service_name = 'jobs' AND a.action_name IN ('create', 'runNow', 'submitRun', 'getRunOutput', 'delete')))
+          AND a.source_ip_address IS NOT NULL AND NOT a.source_ip_address RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])'
+      ),
+      hist AS (
+        SELECT DISTINCT actor, src_ip FROM s
+        WHERE event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS AND action_name IN ('submitRun', 'runNow')
+      )
+      SELECT max(s.event_time) AS event_time, s.actor AS actor,
+             CASE WHEN s.actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             s.src_ip AS src_ip,
+             count_if(s.action_name IN ('importNotebook', 'put', 'import')) AS staged,
+             count_if(s.service_name = 'jobs' AND s.action_name = 'create') AS job_creates,
+             count_if(s.action_name IN ('submitRun', 'runNow')) AS runs,
+             count_if(s.action_name = 'getRunOutput') AS outputs,
+             count_if(s.action_name IN ('deleteNotebook', 'delete')) AS deletes,
+             max_by(s.user_agent, s.event_time) AS user_agent,
+             min(s.event_time) AS first_time
+      FROM s
+      LEFT ANTI JOIN hist AS h ON h.actor = s.actor AND h.src_ip = s.src_ip
+      WHERE IN_TIMERANGE(s.event_time)
+      GROUP BY s.actor, s.src_ip
+      HAVING count_if(s.action_name IN ('submitRun', 'runNow')) > 0
+         AND (count_if(s.action_name IN ('importNotebook', 'put', 'import')) > 0
+              OR count_if(s.service_name = 'jobs' AND s.action_name = 'create') > 0)
+         AND (count_if(s.action_name = 'getRunOutput') > 0 OR count_if(s.action_name IN ('deleteNotebook', 'delete')) > 0)
+output:
+  summary: '{actor} staged code and ran it from new IP {src_ip}: {staged} staged, {runs} runs, {outputs} outputs read, {deletes} deletes'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    staged: '{staged}'
+    job_creates: '{job_creates}'
+    runs: '{runs}'
+    outputs: '{outputs}'
+    deletes: '{deletes}'
+    user_agent: '{user_agent}'
+    first_time: '{first_time}'
+  default_context: false
+runbook: |
+  1. Find the run (jobs submitRun/runNow by actor from src_ip) and its cluster; read what the code did if it survives.
+  2. If the code read secrets or instance credentials, rotate them.
+  3. Revoke the actor's credential if the run is not explained.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: staged_code_one_time_run

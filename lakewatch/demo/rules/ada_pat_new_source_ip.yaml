@@ -1,0 +1,74 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_pat_new_source_ip
+description: A personal access token (PAT) is used from a source IP that never used this token before.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 1 (access). A leaked PAT is used by somebody else, from somewhere else. The rule takes each
+  external PAT login (accounts.tokenLogin, authenticationMethod API_EXT_PAT_TOKEN) in the run window
+  and looks for the same (tokenId, source IP) pair in the 14 days before that login. No earlier pair
+  means a new source for the token. The baseline includes internal PAT uses (API_INT_PAT_TOKEN), so a
+  token that is normally used from Databricks compute and once from a laptop also fires. False
+  positives: a new CI runner range, a VPN change, a token owner who works from a new place. Check the
+  IP owner and what the token did next.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+  - https://attack.mitre.org/techniques/T1550/001/
+mitre:
+  - {taxonomy: Enterprise, tactic: Initial Access, technique_id: T1078, technique: Valid Accounts,
+     sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1550,
+     technique: Use Alternate Authentication Material, sub_technique_id: T1550.001,
+     sub_technique: Application Access Token}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      -- Baseline: the 14 days before each login (not only before the run window), so a long reset
+      -- lookback does not shrink it.
+      WITH logins AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'accounts' AND action_name = 'tokenLogin'
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+             AND request_params.tokenId IS NOT NULL AND source_ip_address IS NOT NULL
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, request_params.tokenId AS token_id,
+                  request_params.authenticationMethod AS auth_method, user_agent,
+                  response.status_code AS status
+      ),
+      candidates AS (
+        FROM logins
+        |> WHERE IN_TIMERANGE(event_time) AND auth_method = 'API_EXT_PAT_TOKEN' AND status = 200
+      )
+      FROM candidates AS c
+      |> LEFT ANTI JOIN logins AS b
+           ON b.token_id = c.token_id AND b.src_ip = c.src_ip AND b.event_time < c.event_time
+      |> AGGREGATE max(c.event_time) AS event_time, min(c.event_time) AS first_time,
+                   max_by(c.user_agent, c.event_time) AS user_agent
+         GROUP BY c.actor AS actor, c.actor_kind AS actor_kind, c.src_ip AS src_ip, c.token_id AS token_id
+      |> SELECT event_time, actor, actor_kind, src_ip, token_id, first_time, user_agent
+output:
+  summary: 'PAT of {actor} used from a new source IP {src_ip}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '1'
+    token_id: '{token_id}'
+    user_agent: '{user_agent}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Look up src_ip: is it a company range (CI egress, VPN, office)?
+  2. List what the token did from src_ip after first_time (same actor, same IP).
+  3. If the use is not expected, revoke the token (token_id) and ask the owner where it was stored.

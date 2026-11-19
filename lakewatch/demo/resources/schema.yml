@@ -1,0 +1,13 @@
+resources:
+  schemas:
+    databricks_audit_demo:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: Databricks audit demo - synthetic copy of system.access.audit with planted attacks, rules and views
+  volumes:
+    raw:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.databricks_audit_demo.name}
+      name: raw
+      volume_type: MANAGED
+      comment: Generated parquet files of the synthetic audit table

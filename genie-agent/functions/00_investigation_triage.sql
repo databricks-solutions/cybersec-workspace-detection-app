@@ -38,6 +38,20 @@
 -- detect_user_account_created / detect_user_account_deleted functions -- run those
 -- against the lead during the Step 3 pivot when persistence or cleanup is in scope.
 --
+-- ENUMERATION COUNTS. Listing secrets and their ACLs (listSecrets, listAcls) is
+-- in the 'secret' family, and Unity Catalog discovery (getInformationSchema,
+-- listStorageCredentials, listExternalLocations) is its own 'discovery' family,
+-- so an actor that enumerates and gets refused is not outranked by a routine
+-- admin. createRole / generateDatabaseCredential (Lakebase) and the actions the
+-- per-family detections now also watch (deleteSetting, create/
+-- updateExternalLocation, createDownloadUrl) are included for the same reason.
+--
+-- KEEP THIS QUERY'S SHAPE. Counting refusals across ALL actions (not only the
+-- sensitive set) was tried: it means scanning every audit row in the window
+-- and changes the query shape, and in testing the agent stopped reusing this
+-- trusted asset and wrote its own triage SQL instead (0 of 6 runs, against 2
+-- of 3 for this shape). Refusal volume belongs in its own function.
+--
 -- The output is one row per actor+source_ip, capped at the top 50 by breadth
 -- then failures then volume. Pivot on the top row with the per-family detection
 -- queries (e.g. detect_ip_access_list_changes) filtered to that actor.
@@ -50,7 +64,7 @@ RETURNS TABLE (
   actor                     STRING    COMMENT 'Identity that acted (user_identity.email)',
   source_ip                 STRING    COMMENT 'Source IP the actions came from',
   distinct_sensitive_actions INT      COMMENT 'How many distinct sensitive action types -- breadth is the lead signal',
-  families_touched          INT       COMMENT 'How many distinct sensitive families (ip_acl, config, admin_role, identity, credential, secret, storage, data_movement)',
+  families_touched          INT       COMMENT 'How many distinct sensitive families (ip_acl, config, admin_role, identity, credential, secret, storage, discovery, data_movement)',
   failed_attempts           BIGINT    COMMENT 'Sensitive events that did not return status 200',
   total_sensitive_events    BIGINT    COMMENT 'Total sensitive events for this actor+IP in the window',
   sensitive_action_types    STRING    COMMENT 'The distinct sensitive action names seen (order not significant)',
@@ -65,13 +79,14 @@ RETURN
     CAST(COUNT(DISTINCT a.action_name) AS INT),
     CAST(COUNT(DISTINCT CASE
       WHEN a.action_name IN ('createIpAccessList','updateIpAccessList','deleteIpAccessList','IpAccessDenied','accountIpAclsValidationFailed') THEN 'ip_acl'
-      WHEN a.action_name IN ('workspaceConfEdit','setSetting') THEN 'config'
-      WHEN a.action_name IN ('setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment') THEN 'admin_role'
+      WHEN a.action_name IN ('workspaceConfEdit','setSetting','deleteSetting') THEN 'config'
+      WHEN a.action_name IN ('setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment','createRole') THEN 'admin_role'
       WHEN a.action_name IN ('createGroup','removeGroup','addPrincipalToGroup','addPrincipalsToGroup','updateUser','changePassword','mfaAddKey','mfaDeleteKey') THEN 'identity'
-      WHEN a.action_name IN ('generateDbToken','revokeDbToken') THEN 'credential'
-      WHEN a.action_name IN ('getSecret','putSecret','listScopes') THEN 'secret'
-      WHEN a.action_name IN ('createStorageCredential','updateStorageCredential','mount','updateMetastore') THEN 'storage'
-      WHEN a.action_name IN ('downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport') THEN 'data_movement'
+      WHEN a.action_name IN ('generateDbToken','revokeDbToken','generateDatabaseCredential') THEN 'credential'
+      WHEN a.action_name IN ('getSecret','putSecret','listScopes','listSecrets','listAcls') THEN 'secret'
+      WHEN a.action_name IN ('createStorageCredential','updateStorageCredential','mount','updateMetastore','createExternalLocation','updateExternalLocation') THEN 'storage'
+      WHEN a.action_name IN ('getInformationSchema','listStorageCredentials','listExternalLocations') THEN 'discovery'
+      WHEN a.action_name IN ('downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport','createDownloadUrl') THEN 'data_movement'
       ELSE 'other'
     END) AS INT),
     COUNT(CASE WHEN a.response.status_code <> 200 THEN 1 END),
@@ -84,13 +99,14 @@ RETURN
     AND a.user_identity.email IS NOT NULL
     AND a.action_name IN (
       'createIpAccessList','updateIpAccessList','deleteIpAccessList','IpAccessDenied','accountIpAclsValidationFailed',
-      'workspaceConfEdit','setSetting',
-      'setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment',
+      'workspaceConfEdit','setSetting','deleteSetting',
+      'setAdmin','setAccountAdmin','removeAdmin','changeAccountOwner','setRoleAssignment','updateRoleAssignment','createRole',
       'createGroup','removeGroup','addPrincipalToGroup','addPrincipalsToGroup','updateUser','changePassword','mfaAddKey','mfaDeleteKey',
-      'generateDbToken','revokeDbToken',
-      'getSecret','putSecret','listScopes',
-      'createStorageCredential','updateStorageCredential','mount','updateMetastore',
-      'downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport'
+      'generateDbToken','revokeDbToken','generateDatabaseCredential',
+      'getSecret','putSecret','listScopes','listSecrets','listAcls',
+      'createStorageCredential','updateStorageCredential','mount','updateMetastore','createExternalLocation','updateExternalLocation',
+      'getInformationSchema','listStorageCredentials','listExternalLocations',
+      'downloadLargeResults','downloadPreviewResults','downloadQueryResult','filesGet','workspaceExport','createDownloadUrl'
     )
   GROUP BY a.user_identity.email, a.source_ip_address
   ORDER BY 3 DESC, 5 DESC, 6 DESC

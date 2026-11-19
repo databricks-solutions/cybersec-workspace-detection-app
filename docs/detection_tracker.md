@@ -54,6 +54,49 @@ Pattern analysis over 30-day default time windows for threat hunting and investi
 
 ---
 
+## Lakewatch Rules (48 + 1 template)
+
+The detections also run as scheduled [Lakewatch](../lakewatch/README.md) detection rules on `system.access.audit`.
+Setup: [lakewatch/SETUP.md](../lakewatch/SETUP.md).
+
+- **21 `cwda_*` rules** are generated from the Genie Agent functions (`genie-agent/functions/`) and the notebooks'
+  metadata by `lakewatch/tools/build_rules.py`; a test fails when a rule drifts from its detection.
+- **27 `cwdf_*` attack-family rules**, each with a synthetic fixture of a planted attack and near misses
+  (`lakewatch/tests/fixtures/`):
+
+| Rule | Severity | Runs every | What it reports |
+|------|----------|------------|-----------------|
+| `cwdf_anomalous_credential_minting` | High | 1h | A credential is minted anomalously -- a PAT or service principal secret from a creator IP new for the creator, a service principal minting its own PAT from a script, a token with no or very long expiry, or a PAT first used from a different IP new to the account within 72 hours of being minted. |
+| `cwdf_api_cluster_privileged_or_ephemeral` | High | 1h | A cluster created or edited over the API with privilege-bearing configuration -- instance profiles, no isolation, literal storage keys -- or created and permanently deleted within the hour. |
+| `cwdf_audit_log_self_read` | Low | 24h | A principal with no read of the audit log in the 90 days before starts reading system.access.audit. |
+| `cwdf_command_execution_api_public_ip` | High | 1h | Remote command execution through the Command Execution API (1.2) from a public IP by a principal and IP with no such history. |
+| `cwdf_compute_serving_resource_abuse` | Medium | 24h | Compute or model-serving resource abuse -- a principal's first GPU cluster or GPU serving endpoint, or a model-serving requester far above its own daily median or fanning out over many endpoints. |
+| `cwdf_credential_new_network_and_client` | High | 1h | An external credential (personal access token or service principal OAuth secret) is used from a network and a client family that this credential has never used. |
+| `cwdf_credential_pivot_same_source` | High | 1h | A credential is first used from the IP that just harvested secrets or credential files, or the IP that used a revoked token switches to another credential (or the revoked token still works). |
+| `cwdf_denied_privileged_action_burst` | Medium | 1h | A burst of refused privileged or data actions by one principal -- many distinct refused action types, a self-grant attempt, or failed creates across several workspaces. |
+| `cwdf_discovery_breadth_or_novel_actions` | Medium | 1h | One principal suddenly surveys many surfaces -- several discovery families from a new source IP, or several discovery actions it has never performed. |
+| `cwdf_dormant_credential_reactivation` | Medium | 24h | A PAT idle for at least 30 days, or a service principal idle for at least 90 days, authenticates again from a public IP. |
+| `cwdf_foreign_catalog_federation_abuse` | High | 1h | Lakehouse Federation abuse -- a foreign catalog created and deleted within minutes, a first-time foreign catalog creator, or federated queries against the provider's credential and user metadata. |
+| `cwdf_identity_provisioning_anomaly` | High | 1h | An identity is provisioned or elevated outside the normal path -- auto-provisioned on a refused login, as an application, or from an IP new to the account, or added, re-enabled or made admin by an API client. |
+| `cwdf_offensive_code_in_commands` | High | 1h | A submitted command or Python UDF definition steals cloud instance-metadata credentials, spawns a shell or socket, or encodes secrets to get past output redaction. |
+| `cwdf_one_new_ip_many_principals` | High | 1h | One public IP with no sign-in history in the account presents the credentials of several principals, or reaches several workspaces, within one run. |
+| `cwdf_refused_auth_spray` | High | 1h | Refused token logins or IP access list denials across workspaces from one source, with any later success from the same source. |
+| `cwdf_run_output_and_query_history_harvest` | Medium | 1h | Bulk harvest of other principals' SQL query history or job run output by one principal from a public IP. |
+| `cwdf_secret_bulk_read_burst` | High | 1h | A principal reads far more distinct secrets in one run than its own busiest hour of the last 30 days, after enumerating scopes, or from outside Databricks compute. |
+| `cwdf_secret_scope_enumeration` | Medium | 1h | Secret scope enumeration -- keys listed across many scopes, refusals across scopes, scopes listed in several workspaces, or a principal enumerating secrets for the first time from a public IP. |
+| `cwdf_sql_burst_new_client_or_volume` | High | 1h | SQL statements from a client application new to the principal, statement or row volume far above its own baseline, or a bulk-dump shape (hash-sharded reads). |
+| `cwdf_sql_credential_hunting` | Medium | 1h | SQL that hunts for credentials -- information_schema searches for credential-named tables or columns, SELECTs of credential columns, read_files() content greps for key formats, or repeated secret() calls. |
+| `cwdf_staged_code_one_time_run` | High | 1h | Code staged and run once from a new source -- import or upload, a one-time run or a create-and-run job, then the run output fetched or the code deleted, by one principal and IP with no run history from that IP. |
+| `cwdf_suspicious_client_user_agent` | Medium | 1h | A client user agent that does not belong on the credential -- a browser on a PAT or service principal token login, a browser or curl on an OAuth client-credentials mint, or a known offensive tool. |
+| `cwdf_temp_credential_vending_new_source` | Medium | 1h | Temporary data-access credentials or download URLs issued in bulk, refused, or to a public IP and client new for the principal's credential vending. |
+| `cwdf_token_multi_network_rotation` | Medium | 1h | One PAT or service principal credential authenticates from many networks in one run -- at least 10 public /24s, or at least 3 /24s new for that credential. |
+| `cwdf_uc_metadata_enumeration_burst` | Medium | 1h | Unity Catalog metadata enumeration far above the principal's own baseline -- list and get calls, schema breadth, or credential listings across workspaces. |
+| `cwdf_uc_privilege_or_exposure_change` | High | 1h | A change that opens data beyond its boundary -- metastore external access toggled, EXTERNAL_USE, ALL PRIVILEGES or MANAGE granted, a grant to all account users, a Delta Sharing share or recipient created, or a Lakebase superuser role. |
+| `cwdf_workspace_export_burst` | High | 1h | Workspace exports across other users' home folders, of credential-shaped files, or in bulk from a source that never exported. |
+
+One more family rule, `cwdf_external_sql_result_download`, is a template (`lakewatch/templates/`): it needs cloud storage access
+logs ingested into Lakewatch and is not tested.
+
 ## Planned Detections (Not Yet Implemented)
 
 These detections are planned for future implementation based on security requirements and threat landscape evolution.

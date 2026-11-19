@@ -1,0 +1,45 @@
+# TEMPLATE -- not deployed by deploy.py and not tested on a live workspace.
+# Family 22: SQL result files (EXTERNAL_LINKS) fetched from the workspace root storage by a caller outside
+# Databricks and your known clients. The download is visible only in YOUR cloud storage access logs
+# (S3 server access logs or CloudTrail S3 data events; Azure StorageBlobLogs), not in system tables.
+# To use it: ingest those logs for the workspace root bucket/account into a table, replace STORAGE_ACCESS_LOG_TABLE
+# below and the column names to match it, set RESULT_KEY_REGEX to the key prefix of SQL results in your root
+# storage and KNOWN_CLIENT_IPS to your BI/connector egress, then copy the file to ../rules/ and back-test it.
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_external_sql_result_download
+description: SQL EXTERNAL_LINKS result objects downloaded from root storage by an IP outside the known client list.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  Statement Execution API results returned as EXTERNAL_LINKS are presigned URLs to objects in the workspace's root
+  storage; this is the only customer-side measure of how much left through that path. Reports a source IP outside
+  Databricks ranges and your known clients with at least 50 result-object GETs or 1 GB in the run window.
+mitre:
+- {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      SELECT max(request_time) AS event_time, remote_ip AS actor, 'ip' AS actor_kind, remote_ip AS src_ip,
+             count(*) AS gets, sum(bytes_sent) AS bytes
+      FROM STORAGE_ACCESS_LOG_TABLE
+      WHERE IN_TIMERANGE(request_time)
+        AND operation = 'REST.GET.OBJECT' AND http_status IN (200, 206)
+        AND key RLIKE 'RESULT_KEY_REGEX'
+        AND NOT array_contains(array('KNOWN_CLIENT_IPS'), remote_ip)
+      GROUP BY remote_ip
+      HAVING count(*) >= 50 OR sum(bytes_sent) >= 1000000000
+output:
+  summary: '{gets} SQL result objects ({bytes} bytes) downloaded by {src_ip}'
+  event_time_column: event_time
+  context: {actor: '{actor}', actor_kind: '{actor_kind}', src_ip: '{src_ip}', gets: '{gets}', bytes: '{bytes}'}
+  default_context: false
+annotations:
+  source: cybersec-workspace-detection-app
+  family: external_sql_result_download

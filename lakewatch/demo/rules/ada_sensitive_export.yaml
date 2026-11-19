@@ -1,0 +1,80 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_sensitive_export
+description: A workspace export of init-script, configuration or secrets paths, or exports by an identity with no export history.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 6 (collection and exfiltration). Init scripts and configuration notebooks often hold
+  hostnames, keys and the setup of the platform; an attacker exports them to plan the next step or
+  to take secrets out. Other exports are a risk when they come from an identity that does not
+  export. The rule takes each successful workspace.workspaceExport in the run window. It fires when
+  the path matches /init-scripts/, /config/ or /secrets/ (and spelling variants), or when the
+  first export of the identity in the 14 days before the run is in the run window (no earlier
+  export). One finding per identity with all exported paths. False positives: a backup job, a user
+  who moves notebooks to Git for the first time.
+references:
+  - https://attack.mitre.org/techniques/T1530/
+  - https://attack.mitre.org/techniques/T1567/
+mitre:
+  - {taxonomy: Enterprise, tactic: Collection, technique_id: T1530, technique: Data from Cloud Storage}
+  - {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      WITH exports AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'workspace' AND action_name = 'workspaceExport'
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, workspace_id, session_id,
+                  request_params.notebookFullPath AS path, response.status_code AS status
+        |> WHERE actor IS NOT NULL AND actor <> ''
+        -- the earliest export of the identity in the baseline (any status)
+        |> EXTEND min(event_time) OVER (PARTITION BY actor) AS first_export_at
+      ),
+      hits AS (
+        FROM exports
+        |> WHERE IN_TIMERANGE(event_time) AND status = 200
+        |> EXTEND coalesce(path RLIKE '(?i)/(init[-_]?scripts?|config|secrets?)/', false) AS sensitive_path,
+                  IN_TIMERANGE(first_export_at) AS new_exporter
+        |> WHERE sensitive_path OR new_exporter
+      )
+      FROM hits
+      |> AGGREGATE max(event_time) AS event_time, max_by(src_ip, event_time) AS src_ip,
+                   count(*) AS n_exports, min(first_export_at) AS first_export_at,
+                   max(sensitive_path) AS any_sensitive, max(new_exporter) AS is_new_exporter,
+                   max_by(session_id, event_time) AS session_id,
+                   array_join(slice(array_sort(collect_set(path)), 1, 25), ', ') AS paths,
+                   array_join(array_sort(collect_set(workspace_id)), ', ') AS workspaces
+         GROUP BY actor, actor_kind
+      |> EXTEND concat_ws(', ', CASE WHEN any_sensitive THEN 'sensitive_path' END,
+                          CASE WHEN is_new_exporter THEN 'first_export' END) AS reasons
+      |> SELECT event_time, actor, actor_kind, src_ip, session_id, n_exports, paths, reasons, first_export_at,
+                workspaces
+output:
+  summary: 'Sensitive or first-time workspace export by {actor}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '6'
+    session_id: '{session_id}'
+    paths: '{paths}'
+    reasons: '{reasons}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Read the exported paths: do they hold keys, hostnames or credentials? Rotate what they expose.
+  2. Ask the owner of the identity if the export is expected.
+  3. If session_id is set, check the session for new IPs or user agents (ada_session_reuse_new_ip_ua).

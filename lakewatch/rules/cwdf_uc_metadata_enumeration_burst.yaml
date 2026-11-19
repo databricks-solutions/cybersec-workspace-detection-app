@@ -1,0 +1,90 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_uc_metadata_enumeration_burst
+description: Unity Catalog metadata enumeration far above the principal's own baseline -- list and get calls, schema
+  breadth, or credential listings across workspaces.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  Mapping what exists before bulk reads. Per principal and 15-minute bucket in the run window, over Unity Catalog
+  listCatalogs, listSchemas, listTables, listTableSummaries, getTable, getInformationSchema,
+  listStorageCredentials and listExternalLocations, the rule reports: more calls than both 200 and 10 times the
+  principal's 99th-percentile bucket of the 30 days before; at least 100 distinct catalog.schema when the
+  principal never touched more than 20 in a bucket before; or storage credential / external location listings in at
+  least 3 workspaces. The volume and breadth arms need at least 7 days of history for the principal (a new
+  principal's first run maps everything; new identities are covered by cwdf_identity_provisioning_anomaly). Keyed on
+  the principal only: UC rows from warehouses and clusters carry compute IPs. False
+  positives: a new crawler, catalog-sync or BI tool on its first runs.
+mitre:
+- {taxonomy: Enterprise, tactic: Discovery, technique_id: T1526, technique: Cloud Service Discovery}
+- {taxonomy: Enterprise, tactic: Discovery, technique_id: T1619, technique: Cloud Storage Object Discovery}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH uc AS (
+        SELECT a.user_identity.email AS actor, a.event_time, a.action_name, a.workspace_id, a.source_ip_address,
+               concat_ws('.', a.request_params['catalog_name'], a.request_params['schema_name']) AS schema_key
+        FROM {{audit_table}} AS a
+        WHERE a.service_name = 'unityCatalog'
+          AND a.action_name IN ('listCatalogs', 'listSchemas', 'listTables', 'listTableSummaries', 'getTable',
+                                'getInformationSchema', 'listStorageCredentials', 'listExternalLocations')
+          AND a.user_identity.email IS NOT NULL AND a.user_identity.email <> 'System-User'
+          AND a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
+      ),
+      buckets AS (
+        SELECT actor, window(event_time, '15 minutes').start AS bucket,
+               count(*) AS calls,
+               count(DISTINCT schema_key) AS schemas,
+               count(DISTINCT workspace_id) AS workspaces,
+               count_if(action_name IN ('listStorageCredentials', 'listExternalLocations')) AS cred_listings,
+               count(DISTINCT CASE WHEN action_name IN ('listStorageCredentials', 'listExternalLocations')
+                                   THEN workspace_id END) AS cred_workspaces,
+               concat_ws(', ', slice(array_sort(collect_set(source_ip_address)), 1, 5)) AS source_ips,
+               max(event_time) AS last_time
+        FROM uc GROUP BY actor, window(event_time, '15 minutes').start
+      ),
+      base AS (
+        SELECT actor, percentile(calls, 0.99) AS p99_calls, max(schemas) AS max_schemas,
+               min(bucket) < TIMERANGE_NOW() - INTERVAL 7 DAYS AS has_history
+        FROM buckets WHERE bucket < TIMERANGE_NOW() - INTERVAL 2 HOURS GROUP BY actor
+      )
+      SELECT b.last_time AS event_time, b.actor AS actor,
+             CASE WHEN b.actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             b.source_ips AS src_ip,
+             b.bucket AS bucket, b.calls AS calls, b.schemas AS schemas, b.workspaces AS workspaces,
+             b.cred_listings AS cred_listings,
+             round(coalesce(x.p99_calls, 0), 1) AS baseline_p99_calls,
+             coalesce(x.max_schemas, 0) AS baseline_max_schemas
+      FROM buckets AS b LEFT JOIN base AS x ON x.actor = b.actor
+      WHERE IN_TIMERANGE(b.last_time)
+        AND ((coalesce(x.has_history, false) AND b.calls > greatest(200, 10 * x.p99_calls))
+             OR (coalesce(x.has_history, false) AND b.schemas >= 100 AND x.max_schemas < 20)
+             OR b.cred_workspaces >= 3)
+output:
+  summary: '{actor}: {calls} Unity Catalog metadata calls across {schemas} schemas in 15 minutes (usual p99 {baseline_p99_calls})'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    bucket: '{bucket}'
+    calls: '{calls}'
+    schemas: '{schemas}'
+    workspaces: '{workspaces}'
+    cred_listings: '{cred_listings}'
+    baseline_p99_calls: '{baseline_p99_calls}'
+    baseline_max_schemas: '{baseline_max_schemas}'
+  default_context: false
+runbook: |
+  1. Is the principal a crawler, catalog sync or BI tool on a first run? Check who owns it.
+  2. Look for bulk reads that follow (getTable then generateTemporaryTableCredential, SELECTs in query history).
+  3. If not explained, check how the principal signed in (cwdf_credential_new_network_and_client).
+annotations:
+  source: cybersec-workspace-detection-app
+  family: uc_metadata_enumeration_burst

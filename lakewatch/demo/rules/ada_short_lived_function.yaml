@@ -1,0 +1,83 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_short_lived_function
+description: A Unity Catalog function is deleted within 2 hours after it was created.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 6 (clean-up). An attacker who used a function to run code deletes it to remove the
+  evidence. The rule joins each successful unityCatalog.deleteFunction in the run window to a
+  successful createFunction of the same function in the 2 hours before it. The created name is
+  catalog.schema.name from the function_info JSON; the deleted name is request_params.full_name_arg
+  (compared in lower case). Both rows are account-level, so the rule does not filter on the
+  workspace. The two calls do not need the same identity; the finding shows the deleter as the
+  actor and the creator in created_by. One finding per function and delete. False positives: tests
+  and CI jobs that create and drop temporary functions.
+references:
+  - https://attack.mitre.org/techniques/T1070/
+mitre:
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1070, technique: Indicator Removal}
+  - {taxonomy: Enterprise, tactic: Execution, technique_id: T1059, technique: Command and Scripting Interpreter,
+     sub_technique_id: T1059.006, sub_technique: Python}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      -- Account-level rows: no workspace_id filter (the workspace is in request_params.workspace_id).
+      WITH uc AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'unityCatalog' AND action_name IN ('createFunction', 'deleteFunction')
+             AND response.status_code = 200
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, action_name, request_params.workspace_id AS uc_workspace_id,
+                  lower(CASE WHEN action_name = 'createFunction'
+                             THEN concat_ws('.', get_json_object(request_params.function_info, '$.catalog_name'),
+                                            get_json_object(request_params.function_info, '$.schema_name'),
+                                            get_json_object(request_params.function_info, '$.name'))
+                             ELSE request_params.full_name_arg END) AS function_name
+        |> WHERE function_name IS NOT NULL AND function_name <> ''
+      ),
+      creates AS (
+        FROM uc |> WHERE action_name = 'createFunction'
+      ),
+      deletes AS (
+        FROM uc |> WHERE action_name = 'deleteFunction' AND IN_TIMERANGE(event_time)
+      )
+      FROM deletes AS d
+      |> JOIN creates AS c
+           ON c.function_name = d.function_name AND c.event_time < d.event_time
+          AND d.event_time <= c.event_time + INTERVAL 2 HOURS
+      |> AGGREGATE max(c.event_time) AS created_at, max_by(c.actor, c.event_time) AS created_by,
+                   max_by(c.src_ip, c.event_time) AS created_from_ip
+         GROUP BY d.event_time AS event_time, d.actor AS actor, d.actor_kind AS actor_kind, d.src_ip AS src_ip,
+                  d.function_name AS function_name, d.uc_workspace_id AS uc_workspace_id
+      |> EXTEND CAST((unix_timestamp(event_time) - unix_timestamp(created_at)) / 60 AS INT) AS lifetime_minutes
+      |> SELECT event_time, actor, actor_kind, src_ip, function_name, created_by, created_at, created_from_ip,
+                lifetime_minutes, uc_workspace_id
+output:
+  summary: 'Short-lived function {function_name} deleted by {actor}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '6'
+    function_name: '{function_name}'
+    created_by: '{created_by}'
+    created_from_ip: '{created_from_ip}'
+    lifetime_minutes: '{lifetime_minutes}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Recover the function body from the createFunction row (request_params.function_info, routine_definition).
+  2. Find who called the function while it existed (query history, cluster and warehouse logs).
+  3. If neither created_by nor actor is expected to manage functions, treat both identities as compromised.

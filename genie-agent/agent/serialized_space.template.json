@@ -81,17 +81,17 @@
         "identifier": "system.query.history",
         "column_configs": [
           { "column_name": "account_id", "enable_format_assistance": true },
-          { "column_name": "workspace_id", "enable_format_assistance": true },
+          { "column_name": "client_application", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "compute" },
+          { "column_name": "end_time", "enable_format_assistance": true },
+          { "column_name": "executed_as", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "executed_by", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "execution_status", "enable_format_assistance": true, "enable_entity_matching": true },
+          { "column_name": "start_time", "enable_format_assistance": true },
           { "column_name": "statement_id", "enable_format_assistance": true },
           { "column_name": "statement_text" },
           { "column_name": "statement_type", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "execution_status", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "executed_by", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "executed_as", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "start_time", "enable_format_assistance": true },
-          { "column_name": "end_time", "enable_format_assistance": true },
-          { "column_name": "client_application", "enable_format_assistance": true, "enable_entity_matching": true },
-          { "column_name": "compute" }
+          { "column_name": "workspace_id", "enable_format_assistance": true }
         ]
       }
     ]
@@ -273,7 +273,7 @@
           }
         ],
         "usage_guidance": [
-          "Security-weakening configuration changes: verbose audit logging disabled, IP access list modifications, and Databricks employee access window changes. MITRE T1484. Audit logging disabled ranks CRITICAL because it blinds every other detection. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging."
+          "Security-weakening configuration changes: verbose audit logging disabled, IP access lists turned off or modified, Databricks employee access window changes and maximum token lifetime changes. A single workspaceConfEdit can change several settings at once (comma-joined keys and values in matching positions); every setting in the request is examined, so a security setting bundled with another change is still caught. MITRE T1484, T1562. Audit logging disabled and IP access lists disabled rank CRITICAL: the first blinds every other detection, the second removes the network control for the whole workspace. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, were IP access lists turned off, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging."
         ]
       },
       {
@@ -562,7 +562,7 @@
           }
         ],
         "usage_guidance": [
-          "User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user."
+          "User accounts and service principals created in the account, through the admin console, the SCIM API (scripts, Terraform, IdP provisioning, or an attacker holding an admin token) or just-in-time SSO provisioning (autoUserCreation). target_kind says whether a user or a service principal was created. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Service principals that Databricks Apps create for themselves (endpoint DatabricksApps) are not included. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user, new service principal created, SCIM user creation, auto-provisioned users."
         ]
       },
       {
@@ -598,7 +598,7 @@
           }
         ],
         "usage_guidance": [
-          "Creation or modification of external storage mounts, storage credentials, and external connections (mount, createStorageCredential, updateStorageCredential, createConnection, updateConnection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external connections created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
+          "Creation or modification of external storage mounts, storage credentials, external locations, external connections and foreign catalogs (mount, createStorageCredential, updateStorageCredential, createExternalLocation, updateExternalLocation, createConnection, updateConnection, createCatalog with a connection). MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. These are the control-plane steps that attach an external destination BEFORE data moves, so they are an early indicator rather than evidence of transfer. Refused attempts are kept (status_code 403): probing for a credential or location the actor cannot create is itself a signal. Inspect request_params for where the external target points. Use for: data exfiltration setup, new storage credentials, external locations created, external connections created, foreign catalog created, who mounted external storage, data movement, exfiltration paths, suspicious storage configuration."
         ]
       },
       {
@@ -743,7 +743,7 @@
           }
         ],
         "usage_guidance": [
-          "Personal access tokens (authenticationMethod API_EXT_PAT_TOKEN) grouped by token, showing how many distinct source IPs presented each one. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials. A single token presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, token abuse, stolen access token, is a token compromised, token used from many IPs."
+          "External API tokens -- personal access tokens (API_EXT_PAT_TOKEN), Entra ID tokens (API_AAD_OAUTH_TOKEN) and Databricks OAuth tokens (API_OIDC_TOKEN) -- grouped by credential, showing how many distinct source IPs presented each one. The credential is the token id, else the OAuth client id, else the principal for that token type; credential_type says which. Only credentials presented from more than one IP are returned. Cluster-internal tokens (API_INT_PAT_TOKEN) and IPs that are Databricks platform egress (they carry cluster-internal or in-house OAuth tokens, or in-house OAuth client sign-ins from a private IP or at service volume (one principal at least 200 times a day), e.g. a Databricks App relaying the user token) are excluded. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials, T1550.001 Application Access Token. A single credential presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, OAuth token used from multiple IPs, Entra or service principal token abuse, token abuse, stolen access token, is a token compromised, token used from many IPs, was any token used from more than one IP."
         ]
       },
       {
@@ -852,7 +852,7 @@
           }
         ],
         "usage_guidance": [
-          "A single session id used from more than one public IP or more than one user agent. MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. This is the strongest session signal available in audit data: one session belongs to one browser on one machine, and a legitimate user changing network gets a NEW session rather than carrying the old one. Private IPs and Databricks service agents are excluded. Use for: session hijacking, stolen session, session cookie theft, same session from different devices, session used from two IPs, hijacked session, session anomaly."
+          "A single credential -- a browser session, or a personal access token / OAuth token / OAuth client -- used from more than one public IP (or, for a browser session, more than one user agent). MITRE T1550 Use Alternate Authentication Material, T1539 Steal Web Session Cookie. One session belongs to one browser on one machine, and one token replayed from a second network is the PAT/OAuth replay pattern. Token and OAuth login rows carry no session_id, so they are keyed by request_params tokenId / client_id. A token seen with two user agents from the same IP is normal (CLI plus a script) and is not reported. Private IPs, Databricks service agents and Databricks platform egress (IPs that carry cluster-internal or in-house OAuth tokens, or in-house OAuth client sign-ins from a private IP or at service volume (one principal at least 200 times a day), e.g. a Databricks App relaying the user token) are excluded. Use for: session hijacking, stolen session, session cookie theft, token replay, PAT used from two IPs, same token from different networks, hijacked session, session anomaly."
         ]
       },
       {
@@ -868,7 +868,8 @@
           ",\n  2",
           ",\n  5.0",
           ",\n  100",
-          ",\n  600",
+          ",\n  50",
+          ",\n  30",
           "\n)"
         ],
         "parameters": [
@@ -892,7 +893,7 @@
           }
         ],
         "usage_guidance": [
-          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration, and it is deliberately NOT covered by the general download detection, which excludes SOURCE-format exports as normal development -- the exact format bulk code theft uses. Self-exports from a principal own home directory are excluded as platform tooling; first-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration."
+          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. The baseline comes from its own window of baseline_days ending baseline_exclude_days before start_time, so any search window works. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration. Self-exports from a principal own home directory are excluded as platform tooling UNLESS they come from a network the principal did not use in the baseline window and the IP is not Databricks platform egress (self_home_new_network counts those) -- a stolen token emptying its owner home. First-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, exported other users notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration, stolen token exporting a home folder."
         ]
       },
       {
@@ -929,7 +930,7 @@
           }
         ],
         "usage_guidance": [
-          "Public source IPs producing an unusually high number of distinct sessions, with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs and Databricks service agents are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse."
+          "Public source IPs where an unusually high number of distinct credentials signed in (browser sessions, PATs, OAuth clients; short-lived OAuth tokens count as their client), with the count of distinct identities per IP. MITRE T1078 Valid Accounts, T1110 Brute Force. Many sessions for ONE identity suggests scripted re-authentication; many DISTINCT identities from one IP suggests a shared exit node, a proxy, or credential stuffing. Private IPs, Databricks service agents and Databricks platform egress IPs are excluded. Use for: many sessions from one IP, credential stuffing, brute force, suspicious IP activity, shared IP address, session count anomaly, proxy or VPN abuse."
         ]
       },
       {
@@ -1037,7 +1038,7 @@
           }
         ],
         "usage_guidance": [
-          "Data leaving the workspace via download or export, AGGREGATED per actor, action and day: downloadPreviewResults, downloadLargeResults, filesGet, getModelVersionDownloadUri, getModelVersionSignedDownloadUri, workspaceExport (excluding SOURCE format, which is normal source control) and downloadQueryResult (excluding arrows, which is UI rendering). MITRE T1567, TA0010 Exfiltration. Deliberately aggregated, not row-per-event: this is the highest-volume detection here (227,000+ filesGet events from 6 actors in one reference 90-day window), so per-event rows would be unreadable and would truncate. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, result downloads, data leaving the workspace, exfiltration via download, download volume by user."
+          "Data leaving the workspace via download or export, AGGREGATED per actor, action and day: workspaceExport in every format (SOURCE included -- it is what the REST API, CLI and scripted dumps use), filesGet, createDownloadUrl, downloadPreviewResults, downloadLargeResults, downloadQueryResult (excluding arrows, which is UI rendering), getModelVersionDownloadUri, getModelVersionSignedDownloadUri, MLflow readArtifact and readTraceData, and UC model-version read credentials. MITRE T1567, TA0010 Exfiltration. distinct_objects counts distinct notebooks, files, artifacts or model versions; foreign_homes counts OTHER users home folders (/Users/<x>, /Repos/<x>) exported from. Heavy legitimate exporters (CLI sync, CI, scanners) export one home folder; a sweep across several users homes is the exfiltration shape, so sort by foreign_homes, then distinct_objects. Deliberately aggregated, not row-per-event, because this is the highest-volume detection. Look for an actor whose daily volume is out of character, or an identity that should not be downloading at all. Use for: data downloads, who exported data, workspace exports, bulk downloads, notebook export sweep, exported other users notebooks, result downloads, artifact downloads, data leaving the workspace, exfiltration via download, download volume by user."
         ]
       },
       {
@@ -1073,7 +1074,7 @@
           }
         ],
         "usage_guidance": [
-          "Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime."
+          "Personal access tokens (PATs) created, with computed lifetime in days (fractional, so tokens living hours are visible) and a no_expiry flag for tokens created without an expiry -- the most durable credential and the first to review. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, tokens that never expire, generateDbToken, who minted API credentials, token lifetime."
         ]
       },
       {
@@ -1217,7 +1218,7 @@
           }
         ],
         "usage_guidance": [
-          "Account-level setting changes (setSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. Use for: account level configuration changes, account settings modified, what changed at the account level, setSetting events, account-wide config changes, who changed an account setting."
+          "Account-level setting changes and deletions (setSetting and deleteSetting at ACCOUNT_LEVEL), including the audit-safe new value. These apply across every workspace in the account, so blast radius is account-wide. severity is High for account IP access list and network policy settings (acct_ip_acl_rule, acct_ip_acl_enable, network_policy, network_policy_binding): deleting or loosening them removes network controls everywhere. Use for: account level configuration changes, account settings modified or deleted, what changed at the account level, setSetting, deleteSetting, account IP access list rule deleted, network policy changed, account-wide config changes, who changed an account setting."
         ]
       },
       {
@@ -1255,7 +1256,7 @@
           }
         ],
         "usage_guidance": [
-          "Secret discovery behaviour: an identity that both enumerates secret scopes (listScopes) and reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
+          "Secret discovery behaviour: an identity that both enumerates secrets (listScopes, listSecrets or listAcls) and successfully reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Refused secrets calls are returned as secrets_refused for context. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access."
         ]
       },
       {
@@ -1400,7 +1401,7 @@
           }
         ],
         "usage_guidance": [
-          "SQL statements or notebook/job commands that decode a hex or base64 payload at runtime (UNHEX(), xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Reads BOTH system.query.history AND system.access.audit (notebook + job command events); requires SELECT on system.query.history. statement_text carries the payload itself -- SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation."
+          "SQL statements, notebook/job commands and Command Execution API calls that decode a hex or base64 payload at runtime (UNHEX of a hex string literal, xxd -r, base64 -d | bash, printf hex | bash) to obfuscate an executed command, or that ENCODE secret values (base64/hex of dbutils.secrets.get or SQL secret(), or a list-read-encode dump of scopes) to get past output redaction. MITRE T1027 Obfuscated Files or Information, T1059 Command and Scripting Interpreter, TA0005 Defense Evasion. Observed in Databricks pen tests to hide curl exfiltration, reverse shells and credential harvesting from plain-text keyword detections. Reads BOTH system.query.history AND system.access.audit (notebook + job command events, and data-plane-router commandExecute when verbose audit logging is on) -- requires SELECT on system.query.history. statement_text is the payload itself: SENSITIVE, redact before sharing. Legitimate UNHEX/base64 data engineering is the expected false positive. Statements that contain the own text of this function (its encoding_technique column) are excluded, so Genie, Lakewatch or a test running it do not report themselves. Use for: encoded command execution, obfuscated commands, hex encoded payload, base64 decode and execute, UNHEX, xxd, obfuscation, defense evasion, hidden shell command, encoded reverse shell, command injection obfuscation, secret redaction bypass, secrets printed encoded, remote command execution API."
         ]
       },
       {

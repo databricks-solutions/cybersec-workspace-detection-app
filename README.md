@@ -10,16 +10,39 @@ This tool provides **35 security detections** organized by urgency and investiga
 - **16 Event-based Detections** - High-confidence alerts for immediate response (24-hour default window)
 - **19 Behavioral Detections** - Pattern analysis for threat hunting (30-day default window)
 
-### Four Ways to Use This Tool
+### Five Ways to Use This Tool
 
-1. **💬 Genie Agent** - Ask questions in plain English instead of running notebooks (Recommended for investigations)
-2. **🎯 Threat Model Investigations** - Generate investigation notebooks for 7 specific threat scenarios (Recommended for newcomers)
-3. **📊 User Behavior Analysis** - Generate user-specific activity reports
-4. **🔍 Individual Detections** - Execute specific detection notebooks for targeted analysis
+1. **🛡️ Lakewatch Rules** - Run the detections, plus 27 attack-family rules, as scheduled [Lakewatch](lakewatch/README.md) detection rules with built-in alert triage (Recommended for continuous monitoring)
+2. **💬 Genie Agent** - Ask questions in plain English instead of running notebooks (Recommended for investigations)
+3. **🎯 Threat Model Investigations** - Generate investigation notebooks for 7 specific threat scenarios (Recommended for newcomers)
+4. **📊 User Behavior Analysis** - Generate user-specific activity reports
+5. **🔍 Individual Detections** - Execute specific detection notebooks for targeted analysis
 
 👉 **New to this tool?** Start with [Threat Model Investigations](#threat-model-investigations) to investigate common security scenarios.
 
 👉 **Investigating something right now?** Use the [Genie Agent](#genie-agent---ask-your-audit-logs-questions) and just ask.
+
+👉 **Running Lakewatch?** Follow [lakewatch/SETUP.md](lakewatch/SETUP.md) to run the detections as Lakewatch rules.
+
+---
+
+## Lakewatch - Run the Detections as Detection Rules
+
+On a workspace with [Lakewatch](https://docs.databricks.com/aws/en/lakewatch/introduction-to-lakewatch/), the
+detections run as scheduled detection rules on `system.access.audit`. There is nothing to ingest. Alerts are
+investigated with Lakewatch's built-in Genie (*Triage this alert*).
+
+- **48 rules** in [`lakewatch/rules/`](lakewatch/rules/): 21 generated from this repository's detections and 27
+  attack-family rules (credential replay and pivoting, secret enumeration, bulk exports, privilege and exposure changes,
+  and more). Every family rule ships with a synthetic test of a planted attack and near misses.
+- **[`lakewatch/SETUP.md`](lakewatch/SETUP.md)**: from a workspace without Lakewatch to running rules, step by step,
+  with a check at each step.
+- **`lakewatch/deploy.py`**: validates every rule with the Lakewatch API, then creates or updates it. It is safe to
+  re-run: it keeps an analyst's suppressions and enabled state, and changes a rule's run-as only with `--run-as`.
+- **[`lakewatch/demo/`](lakewatch/demo/README.md)**: a self-contained demo on a synthetic audit table.
+
+The notebook, the Genie Agent function and the Lakewatch rule are one detection: change the function or the notebook
+and regenerate the rules with `uv run lakewatch/tools/build_rules.py`. Full guide: **[lakewatch/README.md](lakewatch/README.md)**
 
 ---
 
@@ -70,6 +93,7 @@ cybersec-workspace-detection-app/
 │       │   └── ... (5 more)
 │       ├── user_behavior_analysis.py  # User investigation generator
 │       └── run_all_detections.py      # Batch execution utility
+├── lakewatch/               # Lakewatch detection rules, setup guide, deployer, demo
 ├── lib/
 │   ├── common.py            # Shared detection utilities
 │   ├── threat_model_mappings.py  # Detection-to-threat-model mappings

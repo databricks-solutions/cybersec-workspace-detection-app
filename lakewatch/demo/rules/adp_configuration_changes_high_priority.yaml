@@ -1,0 +1,72 @@
+# Ported from the Lakewatch content pack rule databricks_audit/configuration_changes_high_priority (v1) to the flat v2 rule format of this demo.
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: adp_configuration_changes_high_priority
+description: Detects high-priority configuration changes including verbose audit logging modifications, IP access
+  list changes, MFA enforcement, workspace approval, and customer-approved workspace login configuration updates
+  that could impact security posture
+severity: Medium
+category: Static Signature
+fidelity: FIDELITY_HIGH
+objective: Monitor critical configuration changes that could weaken security controls, modify access policies, or
+  reduce system visibility. This includes verbose audit logging changes, IP access list modifications, MFA enforcement
+  and workspace approval settings, and customer-approved workspace login configuration changes which may signal
+  attacker evasion, insider threat activity, or unauthorized configuration tampering.
+mitre:
+- taxonomy: Enterprise
+  tactic: Defense Evasion
+  technique_id: T1562
+  technique: Impair Defenses
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule:
+  at_least_every: 1h
+  enabled: false
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      FROM {{audit_table}}
+      |> WHERE
+        IN_TIMERANGE(event_time)
+        AND (
+          (action_name = 'workspaceConfEdit' AND request_params.workspaceConfKeys IN (
+            'enableVerboseAuditLogs', 'customerApprovedWSLoginExpirationTime', 'enforceMFA', 'requireWorkspaceApproval'
+          ))
+          OR action_name IN ('createIpAccessList', 'deleteIpAccessList', 'updateIpAccessList')
+        )
+      |> SELECT *
+      |> SELECT event_time,
+           user_identity.email AS actor,
+           CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR identity_metadata.acting_resource_type ILIKE '%service principal%' THEN 'sp' ELSE 'user' END AS actor_kind,
+           source_ip_address AS src_ip,
+           session_id,
+           service_name,
+           action_name,
+           workspace_id,
+           user_agent,
+           response.status_code AS status_code,
+           to_json(request_params) AS params,
+           user_identity.email AS user_identity_email
+output:
+  summary: 'High-priority configuration change: {action_name} by {user_identity_email}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '6'
+    session_id: '{session_id}'
+    service_name: '{service_name}'
+    action_name: '{action_name}'
+    workspace_id: '{workspace_id}'
+    user_agent: '{user_agent}'
+    status_code: '{status_code}'
+    params: '{params}'
+    user_identity_email: '{user_identity_email}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+annotations:
+  content_pack: databricks_audit
+  pack_rule: configuration_changes_high_priority

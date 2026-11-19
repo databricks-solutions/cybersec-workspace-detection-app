@@ -1,0 +1,489 @@
+# Planted: 25 bulk SELECTs through a client the principal never used (Tableau history, now urllib); 12 hash-sharded dumps.
+# Near miss: a BI user at its usual volume and client.
+query_rows:
+- t: -1440
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h10
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -1440
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h11
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -1440
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h12
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -2880
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h20
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -2880
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h21
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -2880
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h22
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -4320
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h30
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -4320
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h31
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -4320
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h32
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -5760
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h40
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -5760
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h41
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -5760
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h42
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -7200
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h50
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -7200
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h51
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -7200
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h52
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -8640
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h60
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -8640
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h61
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -8640
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h62
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -10080
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h70
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -10080
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h71
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -10080
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h72
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -11520
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h80
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -11520
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h81
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -11520
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h82
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -12960
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h90
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -12960
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h91
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -12960
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h92
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -14400
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h100
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -14400
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h101
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -14400
+  executed_by: ana@corp.example
+  client_application: Tableau
+  statement_id: h102
+  statement_text: SELECT region, sum(x) FROM sales GROUP BY region
+  produced_rows: 10
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n0
+  statement_text: SELECT * FROM finance.t0
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n1
+  statement_text: SELECT * FROM finance.t1
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n2
+  statement_text: SELECT * FROM finance.t2
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n3
+  statement_text: SELECT * FROM finance.t3
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n4
+  statement_text: SELECT * FROM finance.t4
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n5
+  statement_text: SELECT * FROM finance.t5
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n6
+  statement_text: SELECT * FROM finance.t6
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n7
+  statement_text: SELECT * FROM finance.t7
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n8
+  statement_text: SELECT * FROM finance.t8
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n9
+  statement_text: SELECT * FROM finance.t9
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n10
+  statement_text: SELECT * FROM finance.t10
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n11
+  statement_text: SELECT * FROM finance.t11
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n12
+  statement_text: SELECT * FROM finance.t12
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n13
+  statement_text: SELECT * FROM finance.t13
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n14
+  statement_text: SELECT * FROM finance.t14
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n15
+  statement_text: SELECT * FROM finance.t15
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n16
+  statement_text: SELECT * FROM finance.t16
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n17
+  statement_text: SELECT * FROM finance.t17
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n18
+  statement_text: SELECT * FROM finance.t18
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n19
+  statement_text: SELECT * FROM finance.t19
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n20
+  statement_text: SELECT * FROM finance.t20
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n21
+  statement_text: SELECT * FROM finance.t21
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n22
+  statement_text: SELECT * FROM finance.t22
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n23
+  statement_text: SELECT * FROM finance.t23
+  produced_rows: 100000
+- t: -30
+  executed_by: ana@corp.example
+  client_application: python-urllib
+  statement_id: n24
+  statement_text: SELECT * FROM finance.t24
+  produced_rows: 100000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d0
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 0
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d1
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 1
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d2
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 2
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d3
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 3
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d4
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 4
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d5
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 5
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d6
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 6
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d7
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 7
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d8
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 8
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d9
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 9
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d10
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 10
+  produced_rows: 1000
+- t: -30
+  executed_by: dumper@corp.example
+  client_application: Databricks SQL Editor
+  statement_id: d11
+  statement_text: SELECT * FROM big WHERE pmod(xxhash64(id), 12) = 11
+  produced_rows: 1000
+- t: -1440
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b1
+  statement_text: SELECT 1
+- t: -2880
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b2
+  statement_text: SELECT 1
+- t: -4320
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b3
+  statement_text: SELECT 1
+- t: -5760
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b4
+  statement_text: SELECT 1
+- t: -7200
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b5
+  statement_text: SELECT 1
+- t: -8640
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b6
+  statement_text: SELECT 1
+- t: -10080
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b7
+  statement_text: SELECT 1
+- t: -11520
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b8
+  statement_text: SELECT 1
+- t: -12960
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b9
+  statement_text: SELECT 1
+- t: -14400
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: b10
+  statement_text: SELECT 1
+- t: -30
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: bn0
+  statement_text: SELECT 1
+- t: -30
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: bn1
+  statement_text: SELECT 1
+- t: -30
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: bn2
+  statement_text: SELECT 1
+- t: -30
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: bn3
+  statement_text: SELECT 1
+- t: -30
+  executed_by: bi@corp.example
+  client_application: Tableau
+  statement_id: bn4
+  statement_text: SELECT 1
+expect:
+  hits:
+  - actor: ana@corp.example
+    client: python-urllib
+    new_client: 'true'
+  - actor: dumper@corp.example
+    hash_shards: 12
+  misses:
+  - actor: bi@corp.example

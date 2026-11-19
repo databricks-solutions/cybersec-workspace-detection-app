@@ -1,0 +1,60 @@
+# Planted: a script creates a no-isolation cluster with an instance profile and deletes it in 30 minutes; a cluster with a
+# literal storage key. Near misses: a CLI cluster using a secret reference; a no-isolation cluster created in the UI.
+rows:
+- t: -50
+  service_name: clusters
+  action_name: create
+  email: mallory@corp.example
+  ip: 203.0.113.180
+  user_agent: python-requests/2.32
+  result: '{"cluster_id": "c-evil"}'
+  request_params:
+    aws_attributes: '{"instance_profile_arn": "arn:aws:iam::1:instance-profile/prod"}'
+    data_security_mode: NONE
+    spark_conf: '{}'
+- t: -20
+  service_name: clusters
+  action_name: permanentDelete
+  email: mallory@corp.example
+  ip: 203.0.113.180
+  request_params:
+    cluster_id: c-evil
+- t: -30
+  service_name: clusters
+  action_name: create
+  email: sam@corp.example
+  ip: 198.51.100.100
+  user_agent: databricks-cli/0.230
+  result: '{"cluster_id": "c-key"}'
+  request_params:
+    data_security_mode: USER_ISOLATION
+    spark_conf: '{"fs.azure.account.key.acct.dfs.core.windows.net": "AbC123=="}'
+- t: -30
+  service_name: clusters
+  action_name: create
+  email: tia@corp.example
+  ip: 198.51.100.101
+  user_agent: databricks-cli/0.230
+  result: '{"cluster_id": "c-ok"}'
+  request_params:
+    data_security_mode: USER_ISOLATION
+    spark_conf: '{"fs.azure.account.key.acct": "{{secrets/s/k}}"}'
+- t: -30
+  service_name: clusters
+  action_name: create
+  email: uma@corp.example
+  ip: 198.51.100.102
+  user_agent: Mozilla/5.0
+  result: '{"cluster_id": "c-ui"}'
+  request_params:
+    data_security_mode: NONE
+expect:
+  hits:
+  - actor: mallory@corp.example
+    no_isolation: 1
+    short_lived: 1
+  - actor: sam@corp.example
+    literal_keys: 1
+  misses:
+  - actor: tia@corp.example
+  - actor: uma@corp.example

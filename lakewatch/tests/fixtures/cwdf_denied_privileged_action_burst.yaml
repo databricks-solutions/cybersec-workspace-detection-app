@@ -1,0 +1,60 @@
+# Planted: 5 distinct refused privileged actions; a refused self-grant. Near miss: a user refused twice on one table.
+rows:
+- t: -30
+  service_name: unityCatalog
+  action_name: createCatalog
+  email: mallory@corp.example
+  ip: 203.0.113.210
+  status: 403
+- t: -30
+  service_name: unityCatalog
+  action_name: createExternalLocation
+  email: mallory@corp.example
+  ip: 203.0.113.210
+  status: 403
+- t: -30
+  service_name: secrets
+  action_name: getSecret
+  email: mallory@corp.example
+  ip: 203.0.113.210
+  status: 403
+- t: -30
+  service_name: unityCatalog
+  action_name: createShare
+  email: mallory@corp.example
+  ip: 203.0.113.210
+  status: 403
+- t: -30
+  service_name: unityCatalog
+  action_name: getTable
+  email: mallory@corp.example
+  ip: 203.0.113.210
+  status: 403
+- t: -30
+  service_name: unityCatalog
+  action_name: updatePermissions
+  email: self@corp.example
+  ip: 203.0.113.211
+  status: 403
+  request_params:
+    changes: '[{"principal": "self@corp.example", "add": ["ALL_PRIVILEGES"]}]'
+- t: -30
+  service_name: unityCatalog
+  action_name: getTable
+  email: user@corp.example
+  ip: 198.51.100.130
+  status: 403
+- t: -29
+  service_name: unityCatalog
+  action_name: getTable
+  email: user@corp.example
+  ip: 198.51.100.130
+  status: 403
+expect:
+  hits:
+  - actor: mallory@corp.example
+    refused_actions: 5
+  - actor: self@corp.example
+    self_grant_attempts: 1
+  misses:
+  - actor: user@corp.example

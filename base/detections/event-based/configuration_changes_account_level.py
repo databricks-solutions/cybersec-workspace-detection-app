@@ -67,7 +67,11 @@
 @detect(output=Output.asDataFrame)
 def configuration_changes_account_level(earliest: str = None, latest: str = None):
     from pyspark.sql.functions import (col, current_date, date_sub, current_timestamp, 
-                                       expr, to_timestamp, concat, lit)
+                                       expr, to_timestamp, concat, lit, when)
+
+    # Account IP access lists and network policies: deleting or changing these removes
+    # network controls for every workspace in the account.
+    security_setting_types = ["acct_ip_acl_rule", "acct_ip_acl_enable", "network_policy", "network_policy_binding"]
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 2 months")
     latest = latest or current_timestamp()
@@ -77,7 +81,8 @@ def configuration_changes_account_level(earliest: str = None, latest: str = None
     # Filter for account-level setting changes
     df_filtered = df.filter(
         (col("audit_level") == "ACCOUNT_LEVEL") &
-        (col("action_name") == "setSetting") &
+        # deleteSetting too: deleting an account IP ACL rule is a change, not an absence of one.
+        (col("action_name").isin("setSetting", "deleteSetting")) &
         (col("event_time").between(earliest, latest))
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_TIME"),
@@ -88,6 +93,9 @@ def configuration_changes_account_level(earliest: str = None, latest: str = None
             lit(" for "),
             col("audit_level")
         ).alias("ACTION_DESCRIPTION"),
+        col("request_params.settingTypeName").alias("SETTING_TYPE"),
+        when(col("request_params.settingTypeName").isin(security_setting_types), "High")
+            .otherwise("Informational").alias("SEVERITY"),
         col("user_identity.email").alias("USER_EMAIL"),
         col("user_agent").alias("USER_AGENT"),
         col("source_ip_address").alias("SOURCE_IP_ADDRESS"),

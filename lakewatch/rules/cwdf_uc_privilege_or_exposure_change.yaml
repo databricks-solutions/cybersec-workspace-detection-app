@@ -1,0 +1,74 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_uc_privilege_or_exposure_change
+description: A change that opens data beyond its boundary -- metastore external access toggled, EXTERNAL_USE, ALL
+  PRIVILEGES or MANAGE granted, a grant to all account users, a Delta Sharing share or recipient created, or a
+  Lakebase superuser role.
+severity: High
+category: Static Signature
+fidelity: FIDELITY_HIGH
+objective: >-
+  Each of these is rare and change-managed in normal operation. In the run window the rule reports updateMetastore
+  changing external_access_enabled; updatePermissions whose changes include EXTERNAL_USE (which lets outside engines
+  vend credentials), ALL_PRIVILEGES or MANAGE, or 'account users'; createShare and createRecipient (refused attempts
+  included); and Lakebase createRole/updateRole requesting DATABRICKS_SUPERUSER or bypassrls, or refused.
+  Databricks-internal control-plane services and grants on the Databricks-managed system catalog are excluded. An event
+  feed: escalate when temporary credential vending or new-client reads of the securable follow. False positives:
+  planned platform changes (match them to change tickets).
+mitre:
+- {taxonomy: Enterprise, tactic: Privilege Escalation, technique_id: T1098, technique: Account Manipulation}
+- {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1537, technique: Transfer Data to Cloud Account}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      SELECT a.event_time AS event_time, a.user_identity.email AS actor,
+             CASE WHEN a.user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             a.source_ip_address AS src_ip, a.user_agent AS user_agent, CAST(a.workspace_id AS STRING) AS workspace_id,
+             a.action_name AS action, a.response.status_code AS status,
+             CASE WHEN a.action_name = 'updateMetastore' THEN 'external_access_toggled'
+                  WHEN a.action_name IN ('createShare', 'createRecipient') THEN 'delta_sharing_object'
+                  WHEN a.service_name = 'postgres' THEN 'lakebase_privileged_role'
+                  WHEN upper(a.request_params['changes']) LIKE '%EXTERNAL_USE%' THEN 'external_use_grant'
+                  WHEN upper(a.request_params['changes']) RLIKE 'ALL_PRIVILEGES|MANAGE' THEN 'all_privileges_grant'
+                  ELSE 'account_users_grant' END AS change_kind,
+             coalesce(a.request_params['securable_full_name'], a.request_params['name'], a.request_params['full_name_arg']) AS securable
+      FROM {{audit_table}} AS a
+      WHERE IN_TIMERANGE(a.event_time)
+        -- Databricks-internal control-plane services (they manage default grants on their own objects)
+        AND NOT coalesce(a.user_agent, '') RLIKE 'Databricks-Service/driver|DBHttpClient/controlPlaneClient'
+        -- grants on the Databricks-managed system catalog
+        AND NOT coalesce(a.request_params['securable_full_name'], a.request_params['full_name_arg'], '') RLIKE '^system([.]|$)'
+        AND ((a.service_name = 'unityCatalog' AND a.action_name = 'updateMetastore'
+              AND a.request_params['external_access_enabled'] IS NOT NULL)
+             OR (a.service_name = 'unityCatalog' AND a.action_name IN ('createShare', 'createRecipient'))
+             OR (a.service_name = 'unityCatalog' AND a.action_name = 'updatePermissions'
+                 AND (upper(coalesce(a.request_params['changes'], '')) RLIKE 'EXTERNAL_USE|ALL_PRIVILEGES|MANAGE'
+                      OR lower(coalesce(a.request_params['changes'], '')) LIKE '%account users%'))
+             OR (a.service_name = 'postgres' AND a.action_name IN ('createRole', 'updateRole')
+                 AND (to_json(a.request_params) RLIKE 'DATABRICKS_SUPERUSER|bypassrls[^,}]{0,6}true'
+                      OR a.response.status_code <> 200)))
+output:
+  summary: '{change_kind}: {action} on {securable} by {actor} (status {status})'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    user_agent: '{user_agent}'
+    workspace_id: '{workspace_id}'
+    action: '{action}'
+    status: '{status}'
+    change_kind: '{change_kind}'
+    securable: '{securable}'
+  default_context: false
+runbook: |
+  1. Match the change to a change ticket or a known admin.
+  2. If not planned: revert it, and look for credential vending or reads of the securable in the next hour.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: uc_privilege_or_exposure_change

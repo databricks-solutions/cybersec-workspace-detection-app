@@ -1,0 +1,83 @@
+# Planted: refused Entra token logins in 4 workspaces from one IP, then a PAT succeeds from it.
+# Near miss: an expired job token refused 3 times in one workspace.
+rows:
+- t: -40
+  action_name: aadTokenLogin
+  email: null
+  ip: 203.0.113.170
+  status: 401
+  workspace_id: '11'
+  user_agent: python-requests/2.32
+  request_params:
+    user: obj-0
+- t: -39
+  action_name: aadTokenLogin
+  email: null
+  ip: 203.0.113.170
+  status: 401
+  workspace_id: '12'
+  user_agent: python-requests/2.32
+  request_params:
+    user: obj-1
+- t: -38
+  action_name: aadTokenLogin
+  email: null
+  ip: 203.0.113.170
+  status: 401
+  workspace_id: '13'
+  user_agent: python-requests/2.32
+  request_params:
+    user: obj-2
+- t: -37
+  action_name: aadTokenLogin
+  email: null
+  ip: 203.0.113.170
+  status: 401
+  workspace_id: '14'
+  user_agent: python-requests/2.32
+  request_params:
+    user: obj-3
+- t: -20
+  action_name: tokenLogin
+  email: hit@corp.example
+  ip: 203.0.113.170
+  status: 200
+  workspace_id: '15'
+  user_agent: python-requests/2.32
+  request_params:
+    tokenId: tk-hit
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -40
+  action_name: tokenLogin
+  email: job@corp.example
+  ip: 198.51.100.90
+  status: 401
+  workspace_id: '11'
+  request_params:
+    tokenId: tk-old
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -39
+  action_name: tokenLogin
+  email: job@corp.example
+  ip: 198.51.100.90
+  status: 401
+  workspace_id: '11'
+  request_params:
+    tokenId: tk-old
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -38
+  action_name: tokenLogin
+  email: job@corp.example
+  ip: 198.51.100.90
+  status: 401
+  workspace_id: '11'
+  request_params:
+    tokenId: tk-old
+    authenticationMethod: API_EXT_PAT_TOKEN
+expect:
+  hits:
+  - src_ip: 203.0.113.170
+    workspaces: 4
+    succeeded_after: 1
+  misses:
+  - src_ip: 198.51.100.90

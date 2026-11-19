@@ -1,0 +1,86 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_first_seen_create_function
+description: An identity creates a Unity Catalog function for the first time in 14 days, or creates three or more in one hour.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 4 (execution). A Python UDF runs code on the compute of whoever calls it, so an attacker
+  can plant functions that run shell commands or call out to the internet. The rule takes each
+  successful unityCatalog.createFunction in the run window. It fires when the identity has no
+  createFunction (any status) in the 14 days before that call, or when the identity created three
+  or more functions in one hour. createFunction rows are account-level (workspace_id '0', the
+  real workspace is in request_params.workspace_id), so the rule does not filter on the
+  workspace. The function name is catalog.schema.name from the function_info JSON. One finding
+  per identity, with all functions it created in the window. False positives: a new project, a deployment that creates a library of functions.
+references:
+  - https://attack.mitre.org/techniques/T1059/006/
+  - https://docs.databricks.com/aws/en/udf/unity-catalog
+mitre:
+  - {taxonomy: Enterprise, tactic: Execution, technique_id: T1059, technique: Command and Scripting Interpreter,
+     sub_technique_id: T1059.006, sub_technique: Python}
+  - {taxonomy: Enterprise, tactic: Persistence, technique_id: T1546, technique: Event Triggered Execution}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7d
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      -- Account-level rows: no workspace_id filter (the workspace is in request_params.workspace_id).
+      WITH fns AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'unityCatalog' AND action_name = 'createFunction'
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, request_params.workspace_id AS uc_workspace_id,
+                  concat_ws('.', get_json_object(request_params.function_info, '$.catalog_name'),
+                            get_json_object(request_params.function_info, '$.schema_name'),
+                            get_json_object(request_params.function_info, '$.name')) AS function_name,
+                  response.status_code AS status
+        |> WHERE actor IS NOT NULL AND actor <> ''
+        -- the earliest createFunction of the identity in the baseline (any status): a create at this
+        -- time has no earlier create, so it is first-seen
+        |> EXTEND min(event_time) OVER (PARTITION BY actor) AS first_create_at
+      ),
+      creates AS (
+        FROM fns |> WHERE status = 200
+        |> EXTEND count(*) OVER (PARTITION BY actor ORDER BY event_time
+                    RANGE BETWEEN INTERVAL 1 HOUR PRECEDING AND CURRENT ROW) AS creates_1h
+      ),
+      candidates AS (
+        FROM creates |> WHERE IN_TIMERANGE(event_time)
+        |> EXTEND event_time = first_create_at AS first_seen, creates_1h >= 3 AS burst
+      )
+      FROM candidates
+      |> AGGREGATE max(event_time) AS event_time, max_by(src_ip, event_time) AS src_ip,
+                   max(creates_1h) AS max_creates_1h, max(first_seen) AS any_first_seen, max(burst) AS any_burst,
+                   array_join(array_sort(collect_set(function_name)), ', ') AS functions,
+                   array_join(array_sort(collect_set(uc_workspace_id)), ', ') AS workspaces
+         GROUP BY actor, actor_kind
+      |> WHERE any_first_seen OR any_burst
+      |> EXTEND concat_ws(', ', CASE WHEN any_first_seen THEN 'first_seen' END,
+                          CASE WHEN any_burst THEN 'burst_1h' END) AS reasons
+      |> SELECT event_time, actor, actor_kind, src_ip, functions, max_creates_1h, workspaces, reasons
+output:
+  summary: 'Unusual function creation by {actor}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '4'
+    functions: '{functions}'
+    workspaces: '{workspaces}'
+    reasons: '{reasons}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Read the function bodies (DESCRIBE FUNCTION EXTENDED): look for subprocess, os.popen, requests, sockets.
+  2. Ask the owner of the identity if the functions are expected.
+  3. Check who called the functions, and look for a deleteFunction soon after (ada_short_lived_function).

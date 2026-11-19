@@ -1,0 +1,89 @@
+# Planted: a PAT used from 4 /24 networks it never used. Near miss: a PAT rotating within its usual /24.
+rows:
+- t: -14400
+  action_name: tokenLogin
+  email: rot@corp.example
+  ip: 198.51.100.150
+  request_params:
+    tokenId: t-rot
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -30
+  action_name: tokenLogin
+  email: rot@corp.example
+  ip: 203.0.113.10
+  user_agent: python-requests/2.32
+  request_params:
+    tokenId: t-rot
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -29
+  action_name: tokenLogin
+  email: rot@corp.example
+  ip: 192.0.2.11
+  user_agent: python-requests/2.32
+  request_params:
+    tokenId: t-rot
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -28
+  action_name: tokenLogin
+  email: rot@corp.example
+  ip: 198.18.0.12
+  user_agent: python-requests/2.32
+  request_params:
+    tokenId: t-rot
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -27
+  action_name: tokenLogin
+  email: rot@corp.example
+  ip: 198.19.1.13
+  user_agent: python-requests/2.32
+  request_params:
+    tokenId: t-rot
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -14400
+  action_name: tokenLogin
+  email: home@corp.example
+  ip: 198.51.100.160
+  request_params:
+    tokenId: t-home
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -30
+  action_name: tokenLogin
+  email: home@corp.example
+  ip: 198.51.100.161
+  request_params:
+    tokenId: t-home
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -29
+  action_name: tokenLogin
+  email: home@corp.example
+  ip: 198.51.100.162
+  request_params:
+    tokenId: t-home
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -28
+  action_name: tokenLogin
+  email: home@corp.example
+  ip: 198.51.100.163
+  request_params:
+    tokenId: t-home
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -27
+  action_name: tokenLogin
+  email: home@corp.example
+  ip: 198.51.100.164
+  request_params:
+    tokenId: t-home
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -26
+  action_name: tokenLogin
+  email: home@corp.example
+  ip: 198.51.100.165
+  request_params:
+    tokenId: t-home
+    authenticationMethod: API_EXT_PAT_TOKEN
+expect:
+  hits:
+  - credential: t-rot
+    new_nets24: 4
+  misses:
+  - credential: t-home

@@ -45,35 +45,46 @@
 # COMMAND ----------
 
 @detect(output=Output.asDataFrame)
-def session_hijack_high_session_count(earliest: str=None, latest: str = None, threshold_seconds: int=600, threshold_value: int=2):
+def session_hijack_high_session_count(earliest: str=None, latest: str = None, threshold_seconds: int=600, threshold_value: int=2,
+                                      min_distinct_ips: int=1):
     from pyspark.sql import functions as F
     from pyspark.sql.window import Window
 
     earliest = earliest or F.current_timestamp() - F.expr("INTERVAL 24 hours")
     latest = latest or F.current_timestamp()
 
-    private_ip_regex = r'^(10\..*|192\.168\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*)$'
+    # RFC 1918, CGNAT / Databricks-internal (100.64.0.0/10), loopback, link-local and IPv6 unique-local.
+    private_ip_regex = (r'^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.'
+                        r'|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|127\.|169\.254\.|(?i)f[cd][0-9a-f]{2}:)')
 
+    # Databricks-internal service clients only. A bare "databricks" used to be in this list; it
+    # matched databricks-cli and the databricks-sdk-* clients (case-sensitive), so an actor's own
+    # SDK/CLI traffic was dropped. Keep SDK, CLI and connector clients.
     known_user_agents = [
-        "databricks",
         "Databricks-Service/driver",
         "Databricks-Runtime",
         "Delta-Sharing-SparkStructuredStreaming",
         "RawDBHttpClient",
+        "wsfs/",
         "mlflow-python",
         "feature-store",
         "dbr:"
     ]
     known_ua_regex = "|".join(known_user_agents)
 
+    # Interactive and token logins. Entra (aad*) and OAuth (oidc*, mintOAuthToken) are what service
+    # principals and Entra tokens use; without them those identities were invisible.
+    login_actions = ["login", "tokenLogin", "samlLogin", "jwtLogin", "aadTokenLogin", "oidcTokenAuthorization",
+                     "aadBrowserLogin", "oidcBrowserLogin", "mintOAuthToken"]
+
     # Load audit logs within the time range
     df_logins = spark.table("system.access.audit") \
         .filter((F.col("event_time") >= earliest) & (F.col("event_time") <= latest)) \
         .filter(F.col("service_name") == "accounts") \
-        .filter(F.col("action_name").isin(["login", "tokenLogin", "samlLogin", "jwtLogin"])) \
+        .filter(F.col("action_name").isin(login_actions)) \
         .filter(~F.col("source_ip_address").rlike(private_ip_regex)) \
         .filter(F.col("user_identity.email").isNotNull()) \
-        .filter(~F.col("user_agent").rlike(known_ua_regex)) \
+        .filter(~F.coalesce(F.col("user_agent"), F.lit("")).rlike(known_ua_regex)) \
         .select(
             F.col("user_identity.email").alias("email"),
             "event_time",
@@ -84,8 +95,10 @@ def session_hijack_high_session_count(earliest: str=None, latest: str = None, th
     # Define window function partitioned by user and sliding within the suspicious time threshold
     window_spec = Window.partitionBy("email").orderBy(F.col("event_time").cast("long")).rangeBetween(-threshold_seconds, 0)
 
-    # Count logins in the suspicious time range
-    df_logins = df_logins.withColumn("login_count", F.count("*").over(window_spec))
+    # Count logins, and distinct public IPs, in the suspicious time range
+    df_logins = df_logins \
+        .withColumn("login_count", F.count("*").over(window_spec)) \
+        .withColumn("ips_in_window", F.size(F.collect_set("source_ip_address").over(window_spec)))
 
     # Aggregate login counts per user over the entire time window
     df_aggregated_logins = df_logins.groupBy("email") \
@@ -94,11 +107,17 @@ def session_hijack_high_session_count(earliest: str=None, latest: str = None, th
             F.countDistinct("source_ip_address").alias("unique_ips"),  # Unique IPs used
             F.min("event_time").alias("first_seen"),  # First login time in window
             F.max("event_time").alias("last_seen"),  # Last login time in window
-            F.max("login_count").alias("max_login_count").cast("int")  # Maximum login count observed in the threshold window
+            F.max("login_count").alias("max_login_count").cast("int"),  # Maximum login count observed in the threshold window
+            F.max("ips_in_window").alias("max_ips_in_window").cast("int")  # Most distinct public IPs seen within one threshold window
         )
 
-    # Filter for users exceeding the login threshold
-    df_suspicious_logins = df_aggregated_logins.filter(F.col("max_login_count") >= threshold_value)
+    # Filter for users exceeding the login threshold. Every API call with a token is a tokenLogin
+    # row, so with token logins included, login_count alone is met by most active principals;
+    # min_distinct_ips=2 keeps only principals seen from several public IPs within the window.
+    df_suspicious_logins = df_aggregated_logins.filter(
+        (F.col("max_login_count") >= threshold_value) &
+        (F.col("max_ips_in_window") >= min_distinct_ips)
+    )
 
     return df_suspicious_logins
 
