@@ -206,9 +206,11 @@ no datasource or parser needed.
    - **Schedule:** the pack default is every 12 hours. Run high-severity rules (verbose audit logging disabled,
      log delivery and federation policy changes) more often, for example hourly.
    - **Rule active:** on (Execution section). Save, then confirm the status reads *Active*.
-   - **Deduplication:** on. The pack rules look back 13 hours on a 12-hour schedule; if you shorten the schedule,
-     set **Deduplication time window → Custom** to at least the lookback (for example 24 hours), or each run
-     re-signals the same events.
+   - **Deduplication:** on. From pack version 3, each rule scans its own run window (`IN_TIMERANGE`): the schedule
+     plus 15 minutes for late audit events, so a shorter schedule also shortens the scan, and deduplication stops an
+     event in the 15-minute overlap from alerting twice. Earlier versions look back a fixed 13 hours (the query has
+     `CURRENT_TIMESTAMP() - INTERVAL 13 HOURS`); with those, if you shorten the schedule, set **Deduplication time
+     window → Custom** to at least 13 hours, or each run re-signals the same events.
 
 Each Lakewatch rule runs as a Databricks **job** (its `status.job_id` in the API) on your detection warehouse, so you
 can also see run history under **Jobs & Pipelines**.
@@ -232,14 +234,12 @@ Expect two alerts within ~30 minutes (audit table lag ~10–15 min + the rule's 
 `<lakewatch_catalog>.__lakewatch.signals` (`summary`, `severity`, `rule_name`, `alert_id`, full `context`).
 The Overview page's *Signals* count can lag behind — check **Alerts** or the signals table.
 
-**Triage an alert with Genie**: **Alerts** → open the alert → **Triage with Genie**
-(on the alert page; security alerts only). Genie states a plan, checks the rule and its history, queries the entities
-(user, IP, user agent), and proposes a verdict (true / false / benign positive). It asks before it (1) adds its comment
-and (2) sets classification + state and assigns the alert to you — approve only if you agree.
+**Triage an alert with Genie** (details in Step 10): **Alerts** → open the alert → Genie panel → **Triage this
+alert**. Genie states a plan, checks the rule and its history, queries the entities (user, IP, user agent), and
+proposes a verdict (true / false / benign positive). It asks before it (1) adds its comment and (2) sets
+classification + state and assigns the alert to you — approve only if you agree.
 - If you see **"Failed to add alert comment"**, ask Genie to apply it again; on our test the retry succeeded.
 - Genie's activity lookups can hit a row limit on busy accounts; it says so in its comment.
-- On our test it also recommended "Align the rule lookback with its schedule" for the Content library rule
-  (13-hour lookback on a 12-hour schedule).
 
 ## Step 9 — Deploy this repository's rules
 
