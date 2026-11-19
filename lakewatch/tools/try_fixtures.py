@@ -87,16 +87,32 @@ def row_sql(r: dict, anchor: datetime) -> str:
         f"{lit(r.get('audit_level', 'WORKSPACE_LEVEL'))} AS audit_level, "
         f"named_struct('run_by', CAST(NULL AS STRING), 'run_as', CAST(NULL AS STRING), "
         f"'acting_resource', CAST(NULL AS STRING), 'acting_resource_type', CAST(NULL AS STRING)) AS identity_metadata, "
-        f"uuid() AS event_id, {lit(r.get('account_id', 'acct'))} AS account_id"
+        f"uuid() AS event_id, {lit(r.get('account_id', 'acct'))} AS account_id, "
+        f"{lit(r['request_id']) if r.get('request_id') else 'uuid()'} AS request_id"
     )
 
 
+def query_row_sql(r: dict, anchor: datetime) -> str:
+    t = anchor + timedelta(minutes=float(r.get("t", -10)))
+    return (f"SELECT {lit(r.get('executed_by'))} AS executed_by, {lit(r.get('executed_as', r.get('executed_by')))} AS executed_as, "
+            f"{lit(r.get('client_application', 'Databricks SQL Editor'))} AS client_application, {ts(t)} AS start_time, "
+            f"{lit(r.get('statement_id', 'stmt'))} AS statement_id, {lit(r.get('statement_text'))} AS statement_text, "
+            f"CAST({int(r.get('produced_rows', 1))} AS BIGINT) AS produced_rows")
+
+
 def statement(rule: dict, fixture: dict, anchor: datetime) -> str:
-    rows = " UNION ALL ".join(row_sql(r, anchor) for r in fixture["rows"])
+    """The rule query over fixture rows. `rows` stand in for the audit table; optional `query_rows`
+    (executed_by, client_application, statement_text, ...) stand in for system.query.history."""
+    rows = " UNION ALL ".join(row_sql(r, anchor) for r in fixture.get("rows") or [{"action_name": "none", "t": -99999}])
     query = rule["batch"]["sql"]["query"].replace("{{audit_table}}", "fixture_audit")
+    ctes = [f"fixture_audit AS ({rows})"]
+    if fixture.get("query_rows"):
+        qrows = " UNION ALL ".join(query_row_sql(r, anchor) for r in fixture["query_rows"])
+        ctes.append(f"fixture_query_history AS ({qrows})")
+        query = re.sub(r"\bsystem\.query\.history\b", "fixture_query_history", query)
     window = dur(rule["schedule"]["at_least_every"]) + dur(rule["timerange"]["extend_lookback"])
     query = rewrite(query, anchor, window).strip().rstrip(";")
-    cte = f"fixture_audit AS ({rows})"
+    cte = ",\n".join(ctes)
     if re.match(r"WITH\b", query, re.I):
         return "WITH " + cte + ",\n" + query[4:].lstrip()
     return f"WITH {cte}\nSELECT * FROM (\n{query}\n) AS rule_output"

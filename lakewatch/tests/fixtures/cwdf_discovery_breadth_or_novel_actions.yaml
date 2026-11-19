@@ -1,0 +1,148 @@
+# Planted: alice surveys 4 families from a new public IP; an SP performs 3 discovery actions it never did.
+# Near misses: bob surveys 4 families from his usual IP in a browser; a principal with no history.
+rows:
+- t: -14400
+  action_name: tokenLogin
+  email: alice@corp.example
+  ip: 198.51.100.21
+  user_agent: databricks-sdk-py/0.40
+  request_params:
+    tokenId: t-alic
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -14400
+  service_name: secrets
+  action_name: getSecret
+  email: alice@corp.example
+  ip: 198.51.100.21
+  user_agent: databricks-sdk-py/0.40
+  request_params:
+    scope: a
+    key: b
+- t: -14400
+  action_name: tokenLogin
+  email: 44444444-5555-6666-7777-888888888888
+  ip: 198.51.100.22
+  user_agent: databricks-sdk-py/0.40
+  request_params:
+    tokenId: t-4444
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -14400
+  service_name: secrets
+  action_name: getSecret
+  email: 44444444-5555-6666-7777-888888888888
+  ip: 198.51.100.22
+  user_agent: databricks-sdk-py/0.40
+  request_params:
+    scope: a
+    key: b
+- t: -14400
+  action_name: tokenLogin
+  email: bob@corp.example
+  ip: 198.51.100.23
+  user_agent: databricks-sdk-py/0.40
+  request_params:
+    tokenId: t-bob@
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -14400
+  service_name: secrets
+  action_name: getSecret
+  email: bob@corp.example
+  ip: 198.51.100.23
+  user_agent: databricks-sdk-py/0.40
+  request_params:
+    scope: a
+    key: b
+- t: -20
+  service_name: secrets
+  action_name: listScopes
+  email: alice@corp.example
+  ip: 203.0.113.70
+  user_agent: python-requests/2.32
+- t: -20
+  service_name: unityCatalog
+  action_name: listExternalLocations
+  email: alice@corp.example
+  ip: 203.0.113.70
+  user_agent: python-requests/2.32
+- t: -20
+  service_name: unityCatalog
+  action_name: listCatalogs
+  email: alice@corp.example
+  ip: 203.0.113.70
+  user_agent: python-requests/2.32
+- t: -20
+  service_name: unityCatalog
+  action_name: listShares
+  email: alice@corp.example
+  ip: 203.0.113.70
+  user_agent: python-requests/2.32
+- t: -20
+  service_name: unityCatalog
+  action_name: listStorageCredentials
+  email: 44444444-5555-6666-7777-888888888888
+  ip: 198.51.100.22
+  user_agent: databricks-sdk-go/0.50
+- t: -20
+  service_name: unityCatalog
+  action_name: listConnections
+  email: 44444444-5555-6666-7777-888888888888
+  ip: 198.51.100.22
+  user_agent: databricks-sdk-go/0.50
+- t: -20
+  service_name: gitCredentials
+  action_name: listGitCredentials
+  email: 44444444-5555-6666-7777-888888888888
+  ip: 198.51.100.22
+  user_agent: databricks-sdk-go/0.50
+- t: -20
+  service_name: secrets
+  action_name: listScopes
+  email: bob@corp.example
+  ip: 198.51.100.23
+  user_agent: Mozilla/5.0
+- t: -20
+  service_name: unityCatalog
+  action_name: listExternalLocations
+  email: bob@corp.example
+  ip: 198.51.100.23
+  user_agent: Mozilla/5.0
+- t: -20
+  service_name: unityCatalog
+  action_name: listCatalogs
+  email: bob@corp.example
+  ip: 198.51.100.23
+  user_agent: Mozilla/5.0
+- t: -20
+  service_name: unityCatalog
+  action_name: listShares
+  email: bob@corp.example
+  ip: 198.51.100.23
+  user_agent: Mozilla/5.0
+- t: -20
+  service_name: secrets
+  action_name: listScopes
+  email: newhire@corp.example
+  ip: 203.0.113.71
+  user_agent: curl/8.4
+- t: -20
+  service_name: unityCatalog
+  action_name: listExternalLocations
+  email: newhire@corp.example
+  ip: 203.0.113.71
+  user_agent: curl/8.4
+- t: -20
+  service_name: unityCatalog
+  action_name: listCatalogs
+  email: newhire@corp.example
+  ip: 203.0.113.71
+  user_agent: curl/8.4
+expect:
+  hits:
+  - actor: alice@corp.example
+    new_ip: 'true'
+    families: 4
+  - actor: 44444444-5555-6666-7777-888888888888
+    new_action_types: 3
+  misses:
+  - actor: bob@corp.example
+  - actor: newhire@corp.example
