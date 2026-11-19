@@ -310,9 +310,20 @@ fails with `UNRESOLVED_COLUMN ... cannot be resolved`.
 ## Step 10 — Investigate with Lakewatch's built-in Genie
 
 No extra Genie space is needed. Lakewatch's own Genie covers investigation:
-- **Triage with Genie** on any alert (Step 8): plan → evidence queries → verdict → comment, with your approval.
-- **Genie** in the Lakewatch sidebar (or **Genie Code** in the top bar) for ad hoc questions over `system.access.audit`,
-  signals, and alerts.
+- **Triage an alert:** **Alerts** → open an alert → open the Genie panel (Genie icon in the top bar). The panel offers
+  *What can I do with this alert?*, *Summarize this alert* and *Triage this alert*. *Triage this alert* starts the
+  **Alert Triage Assistant**. It shows its plan, queries `system.access.audit` for evidence, and gives a verdict
+  (for example *benign positive*: the alert fired correctly on routine activity). Each finding in its table has a
+  verdict weight, a timeframe and a source. It then proposes the alert update, a comment and a status. **Nothing is
+  posted or changed until you confirm.**
+- **Ask ad hoc questions:** **Genie** in the Lakewatch sidebar, over `system.access.audit`, signals and alerts.
+
+Every rule puts `actor` in the signal's context, and most also put `src_ip` (the family rules add `actor_kind`, user
+or service principal), so triage starts from the right identity and address. A rule's first alerts have no history to compare against, so the triage verdict says so; it gets sharper
+as the rule runs.
+
+**Check:** triage one alert from Step 9. Confirm the verdict cites audit-log evidence for that alert's actor and time,
+and that the alert stays *Open* until you approve the proposed update.
 
 The repo's standalone Genie agent (`genie-agent/`) remains the option for workspaces that don't use Lakewatch.
 
