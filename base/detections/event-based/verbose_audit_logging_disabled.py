@@ -69,7 +69,10 @@ def verbose_audit_disabled(earliest:str = None, latest: str = None):
     # workspaceConfKeys / workspaceConfValues are comma-joined in matching positions when one
     # request changes several settings, so look for the pair anywhere in the list instead of
     # comparing the whole string (which let "...,enableVerboseAuditLogs" / "...,false" through).
-    verbose_value = expr("""try_element_at(filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = 'enableVerboseAuditLogs'), 1).value""")
+    # Values are not escaped: a list setting's value can contain a comma and shift the positions.
+    # Setting names never contain a comma, so values are paired only when the token counts match;
+    # otherwise the value is unknown and configuration_changes_high_priority reports the edit by key.
+    verbose_value = expr("""try_element_at(filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = 'enableVerboseAuditLogs'), 1).value""")
 
     df_filtered = df.filter(
         (col("action_name").isin("workspaceConfEdit")) &

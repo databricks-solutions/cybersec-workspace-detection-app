@@ -75,10 +75,12 @@ def configuration_changes_high_priority(earliest:str = None, latest: str = None)
     # One workspaceConfEdit can carry several settings: workspaceConfKeys and workspaceConfValues
     # are comma-joined in matching positions (e.g. "enableProjectsAllowList,projectsAllowListPermissions"
     # / "false,ALL_REPOS"). Comparing the whole key string with "=" let a security setting changed in
-    # the same request as another one through, so pair keys and values by position.
-    disables_control = expr("""exists(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists')
+    # the same request as another one through, so pair keys and values by position. Values are not
+    # escaped (a list setting's value can contain a comma), so they are paired only when the key and
+    # value token counts match; otherwise the key is still reported, with its value unknown.
+    disables_control = expr("""exists(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists')
                                               AND lower(c.value) = 'false')""")
-    key_changed = lambda key: expr(f"""exists(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key = '{key}')""")
+    key_changed = lambda key: expr(f"""exists(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = '{key}')""")
 
     df = spark.table("system.access.audit")
 
@@ -90,7 +92,7 @@ def configuration_changes_high_priority(earliest:str = None, latest: str = None)
             col("action_name").isin("createIpAccessList", "deleteIpAccessList", "updateIpAccessList") |
             # Verbose audit logging, IP access lists on/off, Databricks employee access window,
             # maximum token lifetime -- in any position of a (possibly bundled) workspaceConfEdit
-            ((col("action_name") == "workspaceConfEdit") & (expr("size(" + """filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays'))""" + ")") > 0))
+            ((col("action_name") == "workspaceConfEdit") & (expr("size(" + """filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays'))""" + ")") > 0))
         )
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
@@ -99,7 +101,7 @@ def configuration_changes_high_priority(earliest:str = None, latest: str = None)
         col("user_identity.email").alias("SRC_USER"),
         when(
             col("action_name") == "workspaceConfEdit",
-            expr("""concat_ws(', ', transform(filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)))), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays')),
+            expr("""concat_ws(', ', transform(filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays')),
                                              c -> concat(c.key, ': ', coalesce(c.value, 'N/A'))))""")
         ).when(
             col("action_name").isin("createIpAccessList", "deleteIpAccessList", "updateIpAccessList"),
