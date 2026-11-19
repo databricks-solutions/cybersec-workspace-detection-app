@@ -1,0 +1,92 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_one_new_ip_many_principals
+description: One public IP with no sign-in history in the account presents the credentials of several principals, or
+  reaches several workspaces, within one run.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_HIGH
+objective: >-
+  Credential-dump replay and token-pool validation. Owners do not share a hosting IP with each other's tokens; an
+  actor holding a batch of leaked credentials does. The rule takes successful token and OAuth sign-ins (tokenLogin
+  except cluster-internal PATs, oidcTokenAuthorization, mintOAuthToken, aadTokenLogin, in-house OAuth client
+  authentication) from public IPs in the run window, keeps the /24 networks with no sign-in in the 30 days before,
+  and reports an IP that signed in as at least 3 distinct principals or reached at least 5 workspaces. Many such
+  waves are validation only (a sign-in and nothing else): the alert is still the start of the incident. False
+  positives: a new corporate NAT or VPN exit, a newly connected SaaS integration (ETL, BI or monitoring vendor) or
+  new CI runners; each fires once and then becomes history.
+mitre:
+- {taxonomy: Enterprise, tactic: Initial Access, technique_id: T1078, technique: Valid Accounts,
+   sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+- {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1110, technique: Brute Force,
+   sub_technique_id: T1110.004, sub_technique: Credential Stuffing}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH auth AS (
+        SELECT a.source_ip_address AS src_ip,
+               coalesce(nullif(regexp_extract(a.source_ip_address, '^([0-9]+[.][0-9]+[.][0-9]+)[.]', 1), ''),
+                        a.source_ip_address) AS net24,
+               a.user_identity.email AS principal,
+               coalesce(a.request_params['tokenId'], a.request_params['client_id'], a.user_identity.email) AS credential,
+               a.workspace_id,
+               a.event_time,
+               a.user_agent
+        FROM {{audit_table}} AS a
+        WHERE a.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time <= TIMERANGE_NOW()
+          AND a.response.status_code = 200
+          AND a.action_name IN ('tokenLogin', 'oidcTokenAuthorization', 'mintOAuthToken', 'aadTokenLogin',
+                                'workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')
+          AND coalesce(a.request_params['authenticationMethod'], '') <> 'API_INT_PAT_TOKEN'
+          AND a.user_identity.email IS NOT NULL
+          AND NOT a.source_ip_address RLIKE
+              '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])'
+      ),
+      window_auth AS (SELECT * FROM auth WHERE IN_TIMERANGE(event_time)),
+      first_in_window AS (SELECT net24, min(event_time) AS first_time FROM window_auth GROUP BY net24),
+      new_nets AS (
+        SELECT f.* FROM first_in_window AS f
+        LEFT ANTI JOIN auth AS h
+          ON h.net24 = f.net24 AND h.event_time < f.first_time AND h.event_time >= f.first_time - INTERVAL 30 DAYS
+      )
+      SELECT max(w.event_time) AS event_time,
+             concat_ws(', ', slice(array_sort(collect_set(w.principal)), 1, 10)) AS actor,
+             'many' AS actor_kind,
+             w.src_ip AS src_ip,
+             count(DISTINCT w.principal) AS principals,
+             count(DISTINCT w.credential) AS credentials,
+             count(DISTINCT w.workspace_id) AS workspaces,
+             count(*) AS sign_ins,
+             min(w.event_time) AS first_time,
+             concat_ws(', ', slice(array_sort(collect_set(w.user_agent)), 1, 5)) AS user_agents
+      FROM window_auth AS w
+      JOIN new_nets AS n ON n.net24 = w.net24
+      GROUP BY w.src_ip
+      HAVING count(DISTINCT w.principal) >= 3 OR count(DISTINCT w.workspace_id) >= 5
+output:
+  summary: 'New IP {src_ip} signed in as {principals} principals in {workspaces} workspaces'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    principals: '{principals}'
+    credentials: '{credentials}'
+    workspaces: '{workspaces}'
+    sign_ins: '{sign_ins}'
+    first_time: '{first_time}'
+    user_agents: '{user_agents}'
+  default_context: false
+runbook: |
+  1. Who owns src_ip? A new company egress, VPN, SaaS integration or CI range explains it; a hosting provider or
+     residential proxy does not.
+  2. For each principal in actor: did anything follow the sign-in from src_ip (secrets, exports, admin changes)?
+  3. Revoke or rotate every credential that signed in from src_ip and is not explained, and block the IP.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: one_new_ip_many_principals

@@ -1,0 +1,42 @@
+# Planted: 203.0.113.7 (never seen) validates the PATs of four principals in 20 minutes -> one signal.
+# Near misses: a long-known corporate egress IP with many principals; a new IP with only two principals;
+# four principals from a new IP but every sign-in refused.
+rows:
+  - {t: -14400, action_name: tokenLogin, email: a1@corp.example, ip: 198.51.100.5, user_agent: databricks-cli/0.230,
+     request_params: {tokenId: t-h1, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -40, action_name: tokenLogin, email: a1@corp.example, ip: 203.0.113.7, user_agent: python-requests/2.32,
+     request_params: {tokenId: t1, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -35, action_name: tokenLogin, email: a2@corp.example, ip: 203.0.113.7, user_agent: python-requests/2.32,
+     request_params: {tokenId: t2, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: mintOAuthToken, email: 22222222-3333-4444-5555-666666666666, ip: 203.0.113.7,
+     user_agent: python-requests/2.32, request_params: {client_id: 22222222-3333-4444-5555-666666666666}}
+  - {t: -25, action_name: tokenLogin, email: a4@corp.example, ip: 203.0.113.7, user_agent: python-requests/2.32,
+     request_params: {tokenId: t4, authenticationMethod: API_EXT_PAT_TOKEN}}
+  # corporate egress seen for weeks
+  - {t: -20000, action_name: tokenLogin, email: b1@corp.example, ip: 198.51.100.9, user_agent: databricks-cli/0.230,
+     request_params: {tokenId: e0, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: tokenLogin, email: b1@corp.example, ip: 198.51.100.9, user_agent: databricks-cli/0.230,
+     request_params: {tokenId: e1, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: tokenLogin, email: b2@corp.example, ip: 198.51.100.9, user_agent: databricks-cli/0.230,
+     request_params: {tokenId: e2, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: tokenLogin, email: b3@corp.example, ip: 198.51.100.9, user_agent: databricks-cli/0.230,
+     request_params: {tokenId: e3, authenticationMethod: API_EXT_PAT_TOKEN}}
+  # new IP, two principals only
+  - {t: -30, action_name: tokenLogin, email: c1@corp.example, ip: 192.0.2.44, user_agent: curl/8.4,
+     request_params: {tokenId: c1, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: tokenLogin, email: c2@corp.example, ip: 192.0.2.44, user_agent: curl/8.4,
+     request_params: {tokenId: c2, authenticationMethod: API_EXT_PAT_TOKEN}}
+  # new IP, all refused
+  - {t: -30, action_name: tokenLogin, email: d1@corp.example, ip: 203.0.114.9, status: 401, user_agent: curl/8.4,
+     request_params: {tokenId: d1, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: tokenLogin, email: d2@corp.example, ip: 203.0.114.9, status: 401, user_agent: curl/8.4,
+     request_params: {tokenId: d2, authenticationMethod: API_EXT_PAT_TOKEN}}
+  - {t: -30, action_name: tokenLogin, email: d3@corp.example, ip: 203.0.114.9, status: 401, user_agent: curl/8.4,
+     request_params: {tokenId: d3, authenticationMethod: API_EXT_PAT_TOKEN}}
+expect:
+  hits:
+    - {src_ip: 203.0.113.7, principals: 4}
+  misses:
+    - {src_ip: 198.51.100.9}
+    - {src_ip: 192.0.2.44}
+    - {src_ip: 203.0.114.9}
