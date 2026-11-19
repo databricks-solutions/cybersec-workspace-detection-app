@@ -231,10 +231,18 @@ RETURN
 -- Token scanning / PAT probing.
 -- Port of behavioral/token_scanning_activity.py.
 --
--- The notebook keys on request_params.authenticationMethod = API_EXT_PAT_TOKEN
--- and groups by (tokenId, source_ip) with the port stripped from the IP.
--- ONE token id presenting from MANY source IPs is the signal: a leaked token
--- being tried from multiple places.
+-- The notebook keys on the external token methods (API_EXT_PAT_TOKEN,
+-- API_AAD_OAUTH_TOKEN, API_OIDC_TOKEN) and groups by (credential, source_ip)
+-- with the port stripped from the IP. ONE credential presenting from MANY
+-- source IPs is the signal: a leaked token being tried from multiple places.
+-- Entra and OAuth tokens may carry no tokenId, so the credential falls back to
+-- the OAuth client_id, then to method + principal, rather than dropping them.
+--
+-- Two changes keep OAuth from flooding it (measured on SFE, 30 days: 93K OAuth
+-- tokens, 47,821 on more than one IP): Databricks platform egress is not a
+-- second location and is excluded (see the platform subquery for the test);
+-- and only credentials seen from more than one IP are returned. Result: 28
+-- tokens, mostly corporate VPN egress rotating between addresses.
 --
 -- The notebook's optional MaxMind geo enrichment is NOT ported -- it needs an
 -- .mmdb file on the cluster and cannot be expressed in SQL. Nothing else is
@@ -245,7 +253,8 @@ CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_token_scanning_activity(
   end_time   TIMESTAMP COMMENT 'End of the search window (inclusive)'
 )
 RETURNS TABLE (
-  token_id       STRING    COMMENT 'The PAT being presented',
+  token_id       STRING    COMMENT 'The credential being presented: token id, else OAuth client id, else method:principal',
+  credential_type STRING   COMMENT 'authenticationMethod: API_EXT_PAT_TOKEN (PAT), API_AAD_OAUTH_TOKEN (Entra ID), API_OIDC_TOKEN (Databricks OAuth)',
   distinct_ips   BIGINT    COMMENT 'Distinct source IPs that presented this token. >1 warrants a look',
   source_ips     STRING    COMMENT 'The IPs, comma separated',
   first_seen     TIMESTAMP COMMENT 'First use in the window (UTC)',
@@ -254,10 +263,12 @@ RETURNS TABLE (
   actors         STRING    COMMENT 'Identities associated with the token',
   user_agents    STRING    COMMENT 'Distinct clients that presented it'
 )
-COMMENT 'Personal access tokens (authenticationMethod API_EXT_PAT_TOKEN) grouped by token, showing how many distinct source IPs presented each one. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials. A single token presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, token abuse, stolen access token, is a token compromised, token used from many IPs.'
+COMMENT 'External API tokens -- personal access tokens (API_EXT_PAT_TOKEN), Entra ID tokens (API_AAD_OAUTH_TOKEN) and Databricks OAuth tokens (API_OIDC_TOKEN) -- grouped by credential, showing how many distinct source IPs presented each one. The credential is the token id, else the OAuth client id, else the principal for that token type; credential_type says which. Only credentials presented from more than one IP are returned. Cluster-internal tokens (API_INT_PAT_TOKEN) and IPs that are Databricks platform egress (they carry cluster-internal or in-house OAuth tokens, or in-house OAuth client sign-ins from a private IP or at service volume (one principal at least 200 times a day), e.g. a Databricks App relaying the user token) are excluded. MITRE T1078 Valid Accounts, T1552 Unsecured Credentials, T1550.001 Application Access Token. A single credential presenting from MANY IPs is the leaked-token signal -- one token is meant to live in one place. Geo enrichment from the source notebook is not available here (it needs a MaxMind database file), so judge by IP spread and user agent instead. Use for: token scanning, leaked tokens, PAT used from multiple locations, OAuth token used from multiple IPs, Entra or service principal token abuse, token abuse, stolen access token, is a token compromised, token used from many IPs, was any token used from more than one IP.'
 RETURN
   SELECT
-    a.request_params['tokenId'] AS token_id,
+    COALESCE(a.request_params['tokenId'], a.request_params['client_id'],
+             CONCAT(a.request_params['authenticationMethod'], ':', a.user_identity.email)) AS token_id,
+    MAX(a.request_params['authenticationMethod']) AS credential_type,
     COUNT(DISTINCT regexp_replace(a.source_ip_address, ':[0-9]+$', '')) AS distinct_ips,
     CONCAT_WS(', ', COLLECT_SET(regexp_replace(a.source_ip_address, ':[0-9]+$', ''))) AS source_ips,
     MIN(a.event_time) AS first_seen,
@@ -266,10 +277,35 @@ RETURN
     CONCAT_WS(', ', COLLECT_SET(a.user_identity.email)) AS actors,
     CONCAT_WS(', ', COLLECT_SET(a.user_agent)) AS user_agents
   FROM system.access.audit AS a
-  WHERE a.request_params['authenticationMethod'] = 'API_EXT_PAT_TOKEN'
+  LEFT ANTI JOIN (
+    -- Platform egress: IPs Databricks itself authenticates from. An IP counts when it
+    -- carries a cluster-internal PAT or in-house OAuth token, or the in-house OAuth client
+    -- action (Apps, serverless) from a private address, or that action from a public address
+    -- at service volume: one principal at least 200 times in a day. A laptop calling a
+    -- Databricks App logs the same action from its own IP, far less often (at most 60 a
+    -- day on the reference workspace), so it stays in scope. Looks back 2 days before the
+    -- window so a short window still sees a full day of service traffic.
+    SELECT ip FROM (
+      SELECT regexp_replace(p.source_ip_address, ':[0-9]+$', '') AS ip, p.user_identity.email AS principal,
+             to_date(p.event_time) AS auth_day,
+             count_if(p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')) AS internal_auth,
+             count_if(p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')) AS inhouse_auth
+      FROM system.access.audit AS p
+      WHERE p.event_time BETWEEN start_time - INTERVAL 2 DAYS AND end_time
+        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+      GROUP BY regexp_replace(p.source_ip_address, ':[0-9]+$', ''), p.user_identity.email, to_date(p.event_time)
+    ) AS platform_days
+    GROUP BY ip
+    HAVING sum(internal_auth) > 0
+        OR (sum(inhouse_auth) > 0 AND ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])')
+        OR max(inhouse_auth) >= 200
+  ) AS platform ON regexp_replace(a.source_ip_address, ':[0-9]+$', '') = platform.ip
+  WHERE a.request_params['authenticationMethod'] IN ('API_EXT_PAT_TOKEN', 'API_AAD_OAUTH_TOKEN', 'API_OIDC_TOKEN')
     AND a.event_time BETWEEN start_time AND end_time
-    AND a.request_params['tokenId'] IS NOT NULL
-  GROUP BY a.request_params['tokenId'];
+  GROUP BY COALESCE(a.request_params['tokenId'], a.request_params['client_id'],
+                    CONCAT(a.request_params['authenticationMethod'], ':', a.user_identity.email))
+  HAVING COUNT(DISTINCT regexp_replace(a.source_ip_address, ':[0-9]+$', '')) > 1;
 
 -- --------------------------------------------------------------------------
 -- Spike in administrative SQL activity.
