@@ -355,8 +355,7 @@ RETURN
 --     (/Workspace/Users/<self>/...) is usually platform tooling (Databricks Apps
 --     pulling a deployment bundle). Self-exports still COUNT when they come from
 --     a network (/24) the principal did not use in the baseline window and the
---     IP is not Databricks platform egress (it also carries cluster-internal or
---     in-house OAuth authentication): a stolen token emptying its owner's home.
+--     IP is not Databricks platform egress (see platform_ips below): a stolen token emptying its owner's home.
 --   * no_baseline_threshold -- a first-seen principal has no history, so it is
 --     scored against a flat number rather than being invisible. That is the
 --     failure mode that would matter most in a real incident: a new account
@@ -397,11 +396,28 @@ RETURN
   -- is rejected until the WITH sits inside SELECT * FROM ( ... ).
   SELECT * FROM (
   WITH platform_ips AS (
-    SELECT DISTINCT regexp_replace(p.source_ip_address, ':[0-9]+$', '') AS ip
-    FROM system.access.audit AS p
-    WHERE p.event_time BETWEEN start_time AND end_time
-      AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
-           OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+    -- Platform egress: IPs Databricks itself authenticates from. An IP counts when it
+    -- carries a cluster-internal PAT or in-house OAuth token, or the in-house OAuth client
+    -- action (Apps, serverless) from a private address, or that action from a public address
+    -- at service volume: one principal at least 200 times in a day. A laptop calling a
+    -- Databricks App logs the same action from its own IP, far less often (at most 60 a
+    -- day on the reference workspace), so it stays in scope. Looks back 2 days before the
+    -- window so a short window still sees a full day of service traffic.
+    SELECT ip FROM (
+      SELECT regexp_replace(p.source_ip_address, ':[0-9]+$', '') AS ip, p.user_identity.email AS principal,
+             to_date(p.event_time) AS auth_day,
+             count_if(p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')) AS internal_auth,
+             count_if(p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')) AS inhouse_auth
+      FROM system.access.audit AS p
+      WHERE p.event_time BETWEEN start_time - INTERVAL 2 DAYS AND end_time
+        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+      GROUP BY regexp_replace(p.source_ip_address, ':[0-9]+$', ''), p.user_identity.email, to_date(p.event_time)
+    ) AS platform_days
+    GROUP BY ip
+    HAVING sum(internal_auth) > 0
+        OR (sum(inhouse_auth) > 0 AND ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])')
+        OR max(inhouse_auth) >= 200
   ),
   scan AS (
     SELECT
