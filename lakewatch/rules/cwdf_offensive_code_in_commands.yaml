@@ -11,8 +11,9 @@ objective: >-
   request_params.command), notebook and job commands (runCommand/submitCommand commandText, verbose audit logging
   only) and Unity Catalog Python UDF definitions (createFunction/updateFunction routine_definition), and reports
   code that reaches the instance metadata service for role credentials (169.254.169.254 .../security-credentials,
-  metadata.google.internal, /metadata/identity/oauth2/token), opens a reverse-shell style socket or shell, or reads
-  dbutils.secrets together with encoding or character splitting. Only a hash of the code is returned. False
+  metadata.google.internal, /metadata/identity/oauth2/token), opens a reverse-shell style socket or shell, or
+  encodes a secret value (an encoder applied to dbutils.secrets.get, or a list-read-encode dump of scopes) to get
+  past output redaction. Only a hash of the code is returned. False
   positives: platform engineering notebooks that test instance roles; legitimate subprocess use is excluded unless
   combined with a socket or a shell redirect.
 mitre:
@@ -44,13 +45,18 @@ batch:
                       THEN 'imds_credential'
                     WHEN code RLIKE '(?i)socket[.]connect|/dev/tcp/|nc\\s+-e|bash\\s+-i\\s*>|pty[.]spawn'
                       THEN 'reverse_shell'
-                    WHEN code RLIKE 'dbutils[.]secrets[.]get' AND code RLIKE '(?i)b(16|32|64|85)encode|hexlify|[.]hex[(][)]|chr[(]'
+                    -- an encoder applied to the secret itself, or a list-read-encode dump of scopes (a bare
+                    -- co-occurrence of secrets.get and an encoder in one cell is common in normal jobs)
+                    WHEN code RLIKE '(b(16|32|64|85)encode|a85encode|hexlify|codecs[.]encode)\\s*[(]\\s*dbutils[.]secrets[.]get(Bytes)?[(]|dbutils[.]secrets[.]get(Bytes)?[(][^)]*[)]\\s*([.]encode[(][^)]*[)])?\\s*[.](hex|encode)[(]|[.]join[(]\\s*(list[(])?\\s*dbutils[.]secrets[.]get[(]|for\\s+\\w+\\s+in\\s+dbutils[.]secrets[.]get[(]'
+                         OR (code LIKE '%dbutils.secrets.list%' AND code LIKE '%dbutils.secrets.get%'
+                             AND code RLIKE '(b(16|32|64|85)encode|a85encode|hexlify|codecs[.]encode|[.]hex[(][)])')
                       THEN 'secret_redaction_bypass'
                END AS technique
         FROM c
         WHERE code IS NOT NULL
-          -- this rule's own text is not offensive code
+          -- detection code (this rule, encoded_command_execution) is not offensive code
           AND lower(code) NOT LIKE '%secret_redaction_bypass%'
+          AND lower(code) NOT LIKE '%encoding_technique%'
       )
       SELECT event_time, actor,
              CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,

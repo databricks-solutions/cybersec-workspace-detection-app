@@ -1,5 +1,6 @@
 # Planted: an API command stealing instance-role credentials from IMDS; a reverse shell in a notebook.
-# Near misses: subprocess for pip install; a normal secret read.
+# Also planted: base64 of a secret printed. Near misses: subprocess for pip install; a normal secret read; a job that
+# base64-compresses JSON in the same cell as a secret read.
 rows:
 - t: -20
   service_name: data-plane-router
@@ -46,11 +47,34 @@ rows:
     commandText: 'token = dbutils.secrets.get(''app'', ''api_token'')
 
       resp = call_api(token)'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: leak@corp.example
+  ip: 10.0.0.11
+  request_params:
+    commandText: 'import base64
+
+      print(base64.b64encode(dbutils.secrets.get(''prod'', ''db_password'').encode()))'
+- t: -20
+  service_name: jobs
+  action_name: runCommand
+  email: etl@corp.example
+  ip: 10.0.0.12
+  request_params:
+    commandText: 'import base64, gzip, json
+
+      pw = dbutils.secrets.get(''etl'', ''api'')
+
+      payload = base64.b64encode(gzip.compress(json.dumps(rows).encode()))'
 expect:
   hits:
   - technique: imds_credential
     actor_kind: sp
   - technique: reverse_shell
     actor: eve@corp.example
+  - technique: secret_redaction_bypass
+    actor: leak@corp.example
   misses:
   - actor: dev@corp.example
+  - actor: etl@corp.example
