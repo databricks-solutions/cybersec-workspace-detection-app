@@ -103,7 +103,8 @@ output:
     first_time: '{first_time}'
   default_context: false
 runbook: |
-  1. Is the export explained (offboarding, migration, backup)? Ask the actor or its owner.
+  1. Is the export explained (offboarding, migration, backup, or a security scanner that reads every notebook's
+     source on a schedule)? Ask the actor or its owner.
   2. List the exported paths (workspaceExport by actor from src_ip) and look for embedded credentials in them.
   3. Rotate any credential found in exported files; revoke the actor's token if the export is not explained.
 annotations:
