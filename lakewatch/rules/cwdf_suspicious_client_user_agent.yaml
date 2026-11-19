@@ -1,0 +1,75 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_suspicious_client_user_agent
+description: A client user agent that does not belong on the credential -- a browser on a PAT or service principal
+  token login, a browser or raw HTTP client on an OAuth client-credentials mint, or a known offensive tool.
+severity: Medium
+category: Static Signature
+fidelity: FIDELITY_HIGH
+objective: >-
+  Machine credentials used by the wrong client. Browsers do not perform client_credentials grants or carry PATs, so a
+  browser string there is a spoof or a human holding a machine secret; real M2M workloads use an SDK. In the run
+  window the rule reports: a known offensive or scanning tool user agent (trufflehog, gitleaks, nuclei, sqlmap,
+  kali, nmap, masscan, zgrab, a self-labelled recon/probe string); mintOAuthToken with grant_type
+  client_credentials from Mozilla, curl, Python-urllib or python-requests; and a browser user agent on at least 5
+  external PAT logins, or on a service principal token login. False positives: a BI/ETL connector or script that
+  copies a browser user agent; the customer's own red team or sanctioned scans.
+mitre:
+- {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1550, technique: Use Alternate Authentication Material,
+   sub_technique_id: T1550.001, sub_technique: Application Access Token}
+- {taxonomy: Enterprise, tactic: Reconnaissance, technique_id: T1595, technique: Active Scanning}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH t AS (
+        SELECT a.user_identity.email AS actor, a.source_ip_address AS src_ip, a.user_agent, a.event_time, a.workspace_id,
+               CASE WHEN lower(coalesce(a.user_agent, '')) RLIKE
+                         '(trufflehog|gitleaks|nuclei|sqlmap|kali|nmap|masscan|zgrab|\\brecon\\b|\\bprobe\\b)'
+                      THEN 'offensive_tool'
+                    WHEN a.action_name = 'mintOAuthToken' AND a.request_params['grant_type'] = 'client_credentials'
+                         AND a.user_agent RLIKE '(?i)^(Mozilla/|curl/|python-urllib/|python-requests/)'
+                      THEN 'non_sdk_m2m_mint'
+                    WHEN a.action_name = 'tokenLogin' AND a.request_params['authenticationMethod'] = 'API_EXT_PAT_TOKEN'
+                         AND a.user_agent LIKE 'Mozilla/%' THEN 'browser_ua_on_pat'
+                    WHEN a.action_name IN ('tokenLogin', 'aadTokenLogin', 'oidcTokenAuthorization')
+                         AND a.user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND a.user_agent LIKE 'Mozilla/%'
+                      THEN 'browser_ua_on_sp' END AS reason
+        FROM {{audit_table}} AS a
+        WHERE IN_TIMERANGE(a.event_time)
+          AND a.service_name IN ('accounts', 'oauth2', 'workspace')
+          AND (a.response.status_code = 200 OR lower(coalesce(a.user_agent, '')) RLIKE
+               '(trufflehog|gitleaks|nuclei|sqlmap|kali|nmap|masscan|zgrab|\\brecon\\b|\\bprobe\\b)')
+      )
+      SELECT max(event_time) AS event_time, actor,
+             CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             src_ip, user_agent, reason, min(event_time) AS first_time, count(*) AS events,
+             count(DISTINCT workspace_id) AS workspaces
+      FROM t
+      WHERE reason IS NOT NULL
+      GROUP BY actor, src_ip, user_agent, reason
+      HAVING reason <> 'browser_ua_on_pat' OR count(*) >= 5
+output:
+  summary: '{reason}: {actor} from {src_ip} with "{user_agent}" ({events} events)'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    user_agent: '{user_agent}'
+    reason: '{reason}'
+    events: '{events}'
+    workspaces: '{workspaces}'
+    first_time: '{first_time}'
+  default_context: false
+runbook: |
+  1. Is the client a known connector or sanctioned scan? If so, allow-list it.
+  2. Otherwise treat the credential as stolen: revoke the PAT or rotate the service principal secret.
+  3. Check what the credential did from src_ip.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: suspicious_client_user_agent

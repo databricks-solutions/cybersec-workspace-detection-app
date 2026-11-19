@@ -81,7 +81,7 @@ def row_sql(r: dict, anchor: datetime) -> str:
         f"named_struct('email', {lit(r.get('email'))}, 'subject_name', CAST(NULL AS STRING)) AS user_identity, "
         f"{lit(r.get('ip'))} AS source_ip_address, {lit(r.get('user_agent'))} AS user_agent, "
         f"named_struct('status_code', CAST({'NULL' if status is None else int(status)} AS INT), "
-        f"'error_message', {lit(r.get('error_message'))}, 'result', CAST(NULL AS STRING)) AS response, "
+        f"'error_message', {lit(r.get('error_message'))}, 'result', CAST({lit(r.get('result'))} AS STRING)) AS response, "
         f"CAST({pm} AS MAP<STRING, STRING>) AS request_params, {lit(r.get('session_id'))} AS session_id, "
         f"CAST({lit(r.get('workspace_id', '1000'))} AS BIGINT) AS workspace_id, "
         f"{lit(r.get('audit_level', 'WORKSPACE_LEVEL'))} AS audit_level, "

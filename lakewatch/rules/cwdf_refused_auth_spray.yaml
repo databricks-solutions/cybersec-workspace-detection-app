@@ -1,0 +1,83 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_refused_auth_spray
+description: Refused token logins or IP access list denials across workspaces from one source, with any later success
+  from the same source.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_HIGH
+objective: >-
+  Testing a stolen credential everywhere it might work. Per source IP in the run window, over refused token logins
+  (tokenLogin, aadTokenLogin, oidcTokenLogin, oidcTokenAuthorization, jwtLogin with 401/403) and IpAccessDenied,
+  the rule reports refusals in at least 3 workspaces or at least 5 refusals, and how many principals then signed in
+  successfully from the same IP (succeeded_after > 0 raises severity). Refused Entra logins carry the object ID in
+  request_params.user with no email; both count. False positives: an expired CI credential replayed by a job at a
+  steady rate (baseline it by IP).
+mitre:
+- {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1110, technique: Brute Force}
+- {taxonomy: Enterprise, tactic: Initial Access, technique_id: T1078, technique: Valid Accounts,
+   sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH ev AS (
+        SELECT a.source_ip_address AS src_ip, coalesce(a.user_identity.email, a.request_params['user']) AS principal,
+               a.workspace_id, a.event_time, a.action_name, a.response.status_code AS status, a.user_agent
+        FROM {{audit_table}} AS a
+        WHERE a.service_name = 'accounts' AND IN_TIMERANGE(a.event_time)
+          AND a.action_name IN ('tokenLogin', 'aadTokenLogin', 'oidcTokenLogin', 'oidcTokenAuthorization', 'jwtLogin',
+                                'samlLogin', 'login', 'IpAccessDenied')
+          AND a.source_ip_address IS NOT NULL
+      ),
+      refused AS (
+        SELECT * FROM ev
+        WHERE (action_name IN ('aadTokenLogin', 'tokenLogin', 'oidcTokenLogin', 'oidcTokenAuthorization', 'jwtLogin')
+               AND status IN (401, 403))
+           OR action_name = 'IpAccessDenied'
+      ),
+      spray AS (
+        SELECT src_ip, count(*) AS refused, count(DISTINCT workspace_id) AS workspaces,
+               count(DISTINCT principal) AS principals, count_if(action_name = 'IpAccessDenied') AS ip_acl_denials,
+               min(event_time) AS first_refused, max(event_time) AS last_refused,
+               concat_ws(', ', slice(array_sort(collect_set(principal)), 1, 10)) AS principal_list,
+               max_by(user_agent, event_time) AS user_agent
+        FROM refused GROUP BY src_ip
+        HAVING count(DISTINCT workspace_id) >= 3 OR count(*) >= 5
+      )
+      SELECT s.last_refused AS event_time, s.principal_list AS actor,
+             CASE WHEN s.principals > 1 THEN 'many' ELSE 'one' END AS actor_kind,
+             s.src_ip AS src_ip, s.refused AS refused, s.workspaces AS workspaces, s.principals AS principals,
+             s.ip_acl_denials AS ip_acl_denials, s.first_refused AS first_refused, s.user_agent AS user_agent,
+             count(DISTINCT e.principal) AS succeeded_after
+      FROM spray AS s
+      LEFT JOIN ev AS e ON e.src_ip = s.src_ip AND e.status = 200 AND e.action_name <> 'IpAccessDenied'
+                       AND e.event_time > s.first_refused
+      GROUP BY s.last_refused, s.principal_list, s.principals, s.src_ip, s.refused, s.workspaces, s.ip_acl_denials,
+               s.first_refused, s.user_agent
+output:
+  summary: '{refused} refused sign-ins from {src_ip} across {workspaces} workspaces for {principals} principals; {succeeded_after} succeeded after'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    refused: '{refused}'
+    workspaces: '{workspaces}'
+    principals: '{principals}'
+    ip_acl_denials: '{ip_acl_denials}'
+    succeeded_after: '{succeeded_after}'
+    first_refused: '{first_refused}'
+    user_agent: '{user_agent}'
+  default_context: false
+runbook: |
+  1. Is src_ip a known job host with an expired credential? Fix the job.
+  2. succeeded_after > 0: a credential worked from the spraying IP -- treat it as compromised and check its activity.
+  3. Block src_ip and rotate the credentials of the principals listed.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: refused_or_blocked_auth_spray

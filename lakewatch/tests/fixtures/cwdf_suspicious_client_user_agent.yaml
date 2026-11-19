@@ -1,0 +1,103 @@
+# Planted: curl doing a client-credentials mint; a browser UA on 6 PAT logins; TruffleHog probing a token.
+# Near misses: an SDK client-credentials mint; a browser UA on only 2 PAT logins.
+rows:
+- t: -20
+  action_name: mintOAuthToken
+  email: 12121212-3434-5656-7878-909090909090
+  ip: 203.0.113.160
+  user_agent: curl/8.4
+  request_params:
+    grant_type: client_credentials
+    client_id: 12121212-3434-5656-7878-909090909090
+- t: -20
+  action_name: mintOAuthToken
+  email: 13131313-3434-5656-7878-909090909090
+  ip: 10.0.0.20
+  user_agent: databricks-sdk-go/0.50
+  request_params:
+    grant_type: client_credentials
+    client_id: 13131313-3434-5656-7878-909090909090
+- t: -20
+  action_name: tokenLogin
+  email: dee@corp.example
+  ip: 203.0.113.161
+  user_agent: Mozilla/5.0 (Windows NT 10.0)
+  request_params:
+    tokenId: tk-dee
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -19
+  action_name: tokenLogin
+  email: dee@corp.example
+  ip: 203.0.113.161
+  user_agent: Mozilla/5.0 (Windows NT 10.0)
+  request_params:
+    tokenId: tk-dee
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -18
+  action_name: tokenLogin
+  email: dee@corp.example
+  ip: 203.0.113.161
+  user_agent: Mozilla/5.0 (Windows NT 10.0)
+  request_params:
+    tokenId: tk-dee
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -17
+  action_name: tokenLogin
+  email: dee@corp.example
+  ip: 203.0.113.161
+  user_agent: Mozilla/5.0 (Windows NT 10.0)
+  request_params:
+    tokenId: tk-dee
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -16
+  action_name: tokenLogin
+  email: dee@corp.example
+  ip: 203.0.113.161
+  user_agent: Mozilla/5.0 (Windows NT 10.0)
+  request_params:
+    tokenId: tk-dee
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -15
+  action_name: tokenLogin
+  email: dee@corp.example
+  ip: 203.0.113.161
+  user_agent: Mozilla/5.0 (Windows NT 10.0)
+  request_params:
+    tokenId: tk-dee
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -20
+  action_name: tokenLogin
+  email: fin@corp.example
+  ip: 198.51.100.80
+  user_agent: Mozilla/5.0
+  request_params:
+    tokenId: tk-fin
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -19
+  action_name: tokenLogin
+  email: fin@corp.example
+  ip: 198.51.100.80
+  user_agent: Mozilla/5.0
+  request_params:
+    tokenId: tk-fin
+    authenticationMethod: API_EXT_PAT_TOKEN
+- t: -20
+  action_name: tokenLogin
+  email: gil@corp.example
+  ip: 203.0.113.162
+  user_agent: TruffleHog
+  status: 401
+  request_params:
+    tokenId: tk-gil
+    authenticationMethod: API_EXT_PAT_TOKEN
+expect:
+  hits:
+  - reason: non_sdk_m2m_mint
+    actor_kind: sp
+  - reason: browser_ua_on_pat
+    actor: dee@corp.example
+  - reason: offensive_tool
+    actor: gil@corp.example
+  misses:
+  - actor: 13131313-3434-5656-7878-909090909090
+  - actor: fin@corp.example
