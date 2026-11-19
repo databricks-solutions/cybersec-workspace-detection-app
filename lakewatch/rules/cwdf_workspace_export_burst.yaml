@@ -11,9 +11,9 @@ objective: >-
   look for embedded credentials; owners export their own work. Per principal and source IP in the run window, over
   successful workspaceExport in any format (SOURCE included), the rule reports any of: exports from at least 3 other
   users' home folders (/Users/<x>/ or /Repos/<x>/); a credential-shaped file (.env, .tfstate, .pem, .key, id_rsa,
-  .npmrc, .git/config, .mcp_servers.json, credentials, secrets.json/yaml/toml) exported from outside the
-  principal's own home by a non-browser client; or at least 20 distinct paths from an IP the principal never
-  exported from in the 30 days before. False positives: an admin exporting a leaver's folder, a deploy identity
+  .npmrc, .git/config, .mcp_servers.json, credentials, secrets.json/yaml/toml) exported from another user's home by
+  a non-browser client; or at least 20 distinct paths from a public IP (not Databricks platform egress) the principal
+  never exported from in the 30 days before. False positives: an admin exporting a leaver's folder, a deploy identity
   reading another user's .env, a new backup job.
 mitre:
 - {taxonomy: Enterprise, tactic: Collection, technique_id: T1213, technique: Data from Information Repositories}
@@ -28,7 +28,14 @@ batch:
   warehouse_id: '{{warehouse_id}}'
   sql:
     query: |
-      WITH e AS (
+      WITH platform_ips AS (
+        SELECT DISTINCT p.source_ip_address AS ip
+        FROM {{audit_table}} AS p
+        WHERE IN_TIMERANGE(p.event_time)
+          AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+               OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+      ),
+      e AS (
         SELECT a.user_identity.email AS actor, a.source_ip_address AS src_ip, a.user_agent, a.event_time,
                a.request_params['notebookFullPath'] AS path,
                lower(regexp_extract(coalesce(a.request_params['notebookFullPath'], ''),
@@ -45,16 +52,18 @@ batch:
         SELECT w.actor, w.src_ip,
                count(DISTINCT w.path) AS paths,
                count(DISTINCT CASE WHEN w.home_owner <> '' AND w.home_owner <> lower(w.actor) THEN w.home_owner END) AS other_homes,
-               count(DISTINCT CASE WHEN w.home_owner <> lower(w.actor) AND NOT coalesce(w.user_agent, '') LIKE 'Mozilla/%'
+               count(DISTINCT CASE WHEN w.home_owner <> '' AND w.home_owner <> lower(w.actor)
+                                    AND NOT coalesce(w.user_agent, '') LIKE 'Mozilla/%'
                                     AND lower(w.path) RLIKE
                                         '(/[.]env([.]|$)|[.]mcp_servers[.]json|[.]tfstate|[.]npmrc|[.]git/config|[.]pem$|id_rsa|[.]key$|credentials|secrets?[.](json|ya?ml|toml))'
                                    THEN w.path END) AS credential_paths,
-               max(h.actor IS NULL) AS new_source,
+               max(h.actor IS NULL AND pi.ip IS NULL AND w.src_ip IS NOT NULL AND NOT w.src_ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])') AS new_source,
                concat_ws(', ', slice(array_sort(collect_set(CASE WHEN w.home_owner <> lower(w.actor) THEN w.home_owner END)), 1, 10)) AS homes,
                concat_ws(', ', slice(array_sort(collect_set(w.user_agent)), 1, 5)) AS user_agents,
                min(w.event_time) AS first_time, max(w.event_time) AS event_time
         FROM e AS w
         LEFT JOIN hist AS h ON h.actor = w.actor AND h.src_ip = w.src_ip
+        LEFT JOIN platform_ips AS pi ON pi.ip = w.src_ip
         WHERE IN_TIMERANGE(w.event_time)
         GROUP BY w.actor, w.src_ip
       )

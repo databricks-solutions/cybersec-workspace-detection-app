@@ -12,7 +12,9 @@ objective: >-
   listStorageCredentials and listExternalLocations, the rule reports: more calls than both 200 and 10 times the
   principal's 99th-percentile bucket of the 30 days before; at least 100 distinct catalog.schema when the
   principal never touched more than 20 in a bucket before; or storage credential / external location listings in at
-  least 3 workspaces. Keyed on the principal only: UC rows from warehouses and clusters carry compute IPs. False
+  least 3 workspaces. The volume and breadth arms need at least 7 days of history for the principal (a new
+  principal's first run maps everything; new identities are covered by cwdf_identity_provisioning_anomaly). Keyed on
+  the principal only: UC rows from warehouses and clusters carry compute IPs. False
   positives: a new crawler, catalog-sync or BI tool on its first runs.
 mitre:
 - {taxonomy: Enterprise, tactic: Discovery, technique_id: T1526, technique: Cloud Service Discovery}
@@ -48,7 +50,8 @@ batch:
         FROM uc GROUP BY actor, window(event_time, '15 minutes').start
       ),
       base AS (
-        SELECT actor, percentile(calls, 0.99) AS p99_calls, max(schemas) AS max_schemas
+        SELECT actor, percentile(calls, 0.99) AS p99_calls, max(schemas) AS max_schemas,
+               min(bucket) < TIMERANGE_NOW() - INTERVAL 7 DAYS AS has_history
         FROM buckets WHERE bucket < TIMERANGE_NOW() - INTERVAL 2 HOURS GROUP BY actor
       )
       SELECT b.last_time AS event_time, b.actor AS actor,
@@ -60,8 +63,8 @@ batch:
              coalesce(x.max_schemas, 0) AS baseline_max_schemas
       FROM buckets AS b LEFT JOIN base AS x ON x.actor = b.actor
       WHERE IN_TIMERANGE(b.last_time)
-        AND (b.calls > greatest(200, 10 * coalesce(x.p99_calls, 0))
-             OR (b.schemas >= 100 AND coalesce(x.max_schemas, 0) < 20)
+        AND ((coalesce(x.has_history, false) AND b.calls > greatest(200, 10 * x.p99_calls))
+             OR (coalesce(x.has_history, false) AND b.schemas >= 100 AND x.max_schemas < 20)
              OR b.cred_workspaces >= 3)
 output:
   summary: '{actor}: {calls} Unity Catalog metadata calls across {schemas} schemas in 15 minutes (usual p99 {baseline_p99_calls})'
