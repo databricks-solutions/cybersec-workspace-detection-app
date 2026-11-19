@@ -1,0 +1,93 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_foreign_catalog_federation_abuse
+description: Lakehouse Federation abuse -- a foreign catalog created and deleted within minutes, a first-time foreign
+  catalog creator, or federated queries against the provider's credential and user metadata.
+severity: High
+category: Behavioral
+fidelity: FIDELITY_HIGH
+objective: >-
+  Federation connections hold credentials to external systems; an actor uses them to reach data and identity outside
+  Databricks. In the run window the rule reports: a foreign catalog (createCatalog with a connection_name) deleted
+  within 15 minutes of creation by the same principal (vend the connection's credentials, clean up); a foreign
+  catalog created by a principal with no createCatalog in the 30 days before; and query-history statements that read
+  provider metadata views (ACCOUNT_USAGE SECRETS, CREDENTIALS, USERS, QUERY_HISTORY, GRANTS_TO_USERS). False
+  positives: Terraform test runs; data platform teams auditing the provider through federation.
+mitre:
+- {taxonomy: Enterprise, tactic: Lateral Movement, technique_id: T1021, technique: Remote Services,
+   sub_technique_id: T1021.007, sub_technique: Cloud Services}
+- {taxonomy: Enterprise, tactic: Discovery, technique_id: T1087, technique: Account Discovery,
+   sub_technique_id: T1087.004, sub_technique: Cloud Account}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH c AS (
+        SELECT a.user_identity.email AS actor, a.source_ip_address AS src_ip, a.user_agent, a.event_time AS created,
+               a.request_params['name'] AS catalog, a.request_params['connection_name'] AS connection
+        FROM {{audit_table}} AS a
+        WHERE a.service_name = 'unityCatalog' AND a.action_name = 'createCatalog' AND a.response.status_code = 200
+          AND a.request_params['connection_name'] IS NOT NULL
+          AND IN_TIMERANGE(a.event_time)
+      ),
+      d AS (
+        SELECT x.user_identity.email AS actor, coalesce(x.request_params['name_arg'], x.request_params['name']) AS catalog,
+               min(x.event_time) AS deleted
+        FROM {{audit_table}} AS x
+        WHERE x.service_name = 'unityCatalog' AND x.action_name = 'deleteCatalog' AND IN_TIMERANGE(x.event_time)
+        GROUP BY 1, 2
+      ),
+      prior AS (
+        SELECT DISTINCT y.user_identity.email AS actor
+        FROM {{audit_table}} AS y
+        WHERE y.service_name = 'unityCatalog' AND y.action_name = 'createCatalog'
+          AND y.event_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND y.event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS
+      ),
+      churn AS (
+        SELECT coalesce(d.deleted, c.created) AS event_time, c.actor, c.src_ip, c.catalog, c.connection,
+               round((unix_timestamp(d.deleted) - unix_timestamp(c.created)) / 60, 1) AS lifetime_minutes,
+               p.actor IS NULL AS first_catalog_create,
+               CASE WHEN d.deleted <= c.created + INTERVAL 15 MINUTES THEN 'create_delete_churn' ELSE 'first_foreign_catalog' END AS kind
+        FROM c
+        LEFT JOIN d ON d.actor = c.actor AND d.catalog = c.catalog AND d.deleted >= c.created
+        LEFT JOIN prior AS p ON p.actor = c.actor
+        WHERE d.deleted <= c.created + INTERVAL 15 MINUTES OR p.actor IS NULL
+      ),
+      provider_meta AS (
+        SELECT max(q.start_time) AS event_time, q.executed_by AS actor, CAST(NULL AS STRING) AS src_ip,
+               CAST(NULL AS STRING) AS catalog, CAST(NULL AS STRING) AS connection,
+               CAST(NULL AS DOUBLE) AS lifetime_minutes, CAST(NULL AS BOOLEAN) AS first_catalog_create,
+               'provider_metadata_query' AS kind
+        FROM system.query.history AS q
+        WHERE IN_TIMERANGE(q.start_time)
+          AND upper(coalesce(q.statement_text, '')) RLIKE 'ACCOUNT_USAGE[.](SECRETS|CREDENTIALS|USERS|QUERY_HISTORY|GRANTS_TO_USERS)'
+          AND upper(coalesce(q.statement_text, '')) NOT LIKE '%PROVIDER_METADATA_QUERY%'
+        GROUP BY q.executed_by
+      )
+      SELECT event_time, actor,
+             CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             src_ip, kind, catalog, connection, lifetime_minutes, first_catalog_create
+      FROM (SELECT * FROM churn UNION ALL SELECT * FROM provider_meta)
+output:
+  summary: '{kind}: {actor} catalog {catalog} on connection {connection} (lifetime {lifetime_minutes} min)'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    kind: '{kind}'
+    catalog: '{catalog}'
+    connection: '{connection}'
+    lifetime_minutes: '{lifetime_minutes}'
+    first_catalog_create: '{first_catalog_create}'
+  default_context: false
+runbook: |
+  1. Who owns the connection, and what credential does it hold? Review the external system's logs for this time.
+  2. Rotate the connection's credential if the use is not explained.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: foreign_catalog_federation_abuse

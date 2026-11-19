@@ -1,0 +1,58 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_run_output_and_query_history_harvest
+description: Bulk harvest of other principals' SQL query history or job run output by one principal from a public IP.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  Query history returns other users' SQL text (which can carry credentials and table names) and run output returns
+  whatever jobs printed, including secrets; orchestrators poll output only for runs they started, and successfully.
+  Per principal and public source IP in the run window, the rule reports at least 200 listHistoryQueries or
+  getHistoryQuery calls, or getRunOutput over at least 100 distinct run IDs (fail_ratio shows how many were refused:
+  enumerating runs it did not start fails often). False positives: monitoring tools that poll run output; query
+  history exporters.
+mitre:
+- {taxonomy: Enterprise, tactic: Collection, technique_id: T1213, technique: Data from Information Repositories}
+- {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1552, technique: Unsecured Credentials}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      SELECT max(a.event_time) AS event_time, a.user_identity.email AS actor,
+             CASE WHEN a.user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             a.source_ip_address AS src_ip, a.action_name AS action,
+             count(*) AS events,
+             count(DISTINCT a.request_params['run_id']) AS distinct_runs,
+             round(avg(CASE WHEN a.response.status_code = 200 THEN 0 ELSE 1 END), 2) AS fail_ratio,
+             min(a.event_time) AS first_time
+      FROM {{audit_table}} AS a
+      WHERE IN_TIMERANGE(a.event_time)
+        AND a.action_name IN ('listHistoryQueries', 'getHistoryQuery', 'getRunOutput')
+        AND a.source_ip_address IS NOT NULL AND NOT a.source_ip_address RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])'
+      GROUP BY a.user_identity.email, a.source_ip_address, a.action_name
+      HAVING (a.action_name <> 'getRunOutput' AND count(*) >= 200)
+          OR (a.action_name = 'getRunOutput' AND count(DISTINCT a.request_params['run_id']) >= 100)
+output:
+  summary: '{actor} harvested {action} from {src_ip}: {events} calls, {distinct_runs} runs, fail ratio {fail_ratio}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    action: '{action}'
+    events: '{events}'
+    distinct_runs: '{distinct_runs}'
+    fail_ratio: '{fail_ratio}'
+    first_time: '{first_time}'
+  default_context: false
+runbook: |
+  1. Is the principal a monitoring or export tool? If so, allow-list it.
+  2. Assume credentials printed in job output or present in query text are exposed; rotate them.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: run_output_and_query_history_harvest

@@ -67,7 +67,8 @@ def test_query_uses_the_run_window(path: Path):
     assert "IN_TIMERANGE(" in query
     assert not re.search(r"\bcurrent_(timestamp|date)\s*\(", query, re.I), "use TIMERANGE_NOW(), not now()"
     assert ":start_time" not in query and ":end_time" not in query
-    assert "system.access.audit" not in query, "read {{audit_table}} so the rule can run on a test table"
+    assert not re.search(r"\b(FROM|JOIN)\s+system\.access\.audit\b", query, re.I), \
+        "read {{audit_table}} so the rule can run on a test table"
 
 
 @pytest.mark.parametrize("path", RULES, ids=lambda p: p.stem)

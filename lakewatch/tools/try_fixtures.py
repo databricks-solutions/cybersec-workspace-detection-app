@@ -97,7 +97,21 @@ def query_row_sql(r: dict, anchor: datetime) -> str:
     return (f"SELECT {lit(r.get('executed_by'))} AS executed_by, {lit(r.get('executed_as', r.get('executed_by')))} AS executed_as, "
             f"{lit(r.get('client_application', 'Databricks SQL Editor'))} AS client_application, {ts(t)} AS start_time, "
             f"{lit(r.get('statement_id', 'stmt'))} AS statement_id, {lit(r.get('statement_text'))} AS statement_text, "
-            f"CAST({int(r.get('produced_rows', 1))} AS BIGINT) AS produced_rows")
+            f"CAST({int(r.get('produced_rows', 1))} AS BIGINT) AS produced_rows, "
+            f"CAST({int(r.get('read_bytes', 1000))} AS BIGINT) AS read_bytes, "
+            f"named_struct('warehouse_id', {lit(r.get('warehouse_id', 'wh1'))}) AS compute")
+
+
+def serving_row_sql(r: dict, anchor: datetime) -> str:
+    t = anchor + timedelta(minutes=float(r.get("t", -10)))
+    return (f"SELECT {lit(r.get('requester'))} AS requester, {ts(t)} AS request_time, "
+            f"{lit(r.get('served_entity_id', 'e1'))} AS served_entity_id, CAST(200 AS INT) AS status_code")
+
+
+def lineage_row_sql(r: dict, anchor: datetime) -> str:
+    t = anchor + timedelta(minutes=float(r.get("t", -10)))
+    return (f"SELECT {lit(r.get('created_by'))} AS created_by, {lit(r.get('source_table_full_name'))} AS source_table_full_name, "
+            f"{ts(t)} AS event_time")
 
 
 def statement(rule: dict, fixture: dict, anchor: datetime) -> str:
@@ -106,6 +120,11 @@ def statement(rule: dict, fixture: dict, anchor: datetime) -> str:
     rows = " UNION ALL ".join(row_sql(r, anchor) for r in fixture.get("rows") or [{"action_name": "none", "t": -99999}])
     query = rule["batch"]["sql"]["query"].replace("{{audit_table}}", "fixture_audit")
     ctes = [f"fixture_audit AS ({rows})"]
+    for key, fn, table, name in (("serving_rows", serving_row_sql, r"system\.serving\.endpoint_usage", "fixture_endpoint_usage"),
+                                 ("lineage_rows", lineage_row_sql, r"system\.access\.table_lineage", "fixture_table_lineage")):
+        if fixture.get(key):
+            ctes.append(f"{name} AS (" + " UNION ALL ".join(fn(r, anchor) for r in fixture[key]) + ")")
+            query = re.sub(r"\b" + table + r"\b", name, query)
     if fixture.get("query_rows"):
         qrows = " UNION ALL ".join(query_row_sql(r, anchor) for r in fixture["query_rows"])
         ctes.append(f"fixture_query_history AS ({qrows})")

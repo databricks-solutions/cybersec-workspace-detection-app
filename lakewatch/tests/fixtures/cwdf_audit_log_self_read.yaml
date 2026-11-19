@@ -1,0 +1,20 @@
+# Planted: a first audit-log read. Near misses: a security analyst who reads it routinely; a read of another table.
+lineage_rows:
+- t: -30
+  created_by: mallory@corp.example
+  source_table_full_name: system.access.audit
+- t: -30
+  created_by: secops@corp.example
+  source_table_full_name: system.access.audit
+- t: -30000
+  created_by: secops@corp.example
+  source_table_full_name: system.access.audit
+- t: -30
+  created_by: analyst@corp.example
+  source_table_full_name: main.sales.orders
+expect:
+  hits:
+  - actor: mallory@corp.example
+  misses:
+  - actor: secops@corp.example
+  - actor: analyst@corp.example

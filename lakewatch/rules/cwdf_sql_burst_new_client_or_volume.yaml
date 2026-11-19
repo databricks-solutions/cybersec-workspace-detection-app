@@ -1,0 +1,83 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_sql_burst_new_client_or_volume
+description: SQL statements from a client application new to the principal, statement or row volume far above its own
+  baseline, or a bulk-dump shape (hash-sharded reads).
+severity: High
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  SQL over a warehouse is a main exfiltration path, and system.query.history is the only system table that sees it:
+  the audit log has no row for most Statement Execution API reads. Per principal (executed_by), client application
+  and hour in the run window, the rule reports: at least 20 statements through a client the principal never used in
+  the 30 days before (for example the Statement Execution API from curl or urllib where its history is a JDBC/ODBC
+  driver or a BI tool); more statements than both 500 and 10 times its 99th-percentile hour; at least 20 statements
+  returning more rows than 10 times its 99th-percentile hour; or at least 10 hash-sharded statements
+  (pmod(xxhash64(...))), a bulk-dump pattern. Statement text is only counted, never returned. query.history has no
+  source IP; correlate with the principal's token logins in the same minutes. False positives: a new BI tool or
+  driver; a backfill job.
+mitre:
+- {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
+- {taxonomy: Enterprise, tactic: Collection, technique_id: T1213, technique: Data from Information Repositories}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24h
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH h AS (
+        SELECT executed_by, coalesce(client_application, 'unknown') AS client, date_trunc('HOUR', start_time) AS hr,
+               count(*) AS statements, count(DISTINCT compute.warehouse_id) AS warehouses,
+               sum(produced_rows) AS rows_out, sum(read_bytes) AS bytes_read,
+               count_if(lower(statement_text) RLIKE 'pmod\\s*[(]\\s*(xx)?hash(64)?[(]') AS hash_shards,
+               max(start_time) AS last_time
+        FROM system.query.history
+        WHERE start_time > TIMERANGE_NOW() - INTERVAL 32 DAYS AND start_time <= TIMERANGE_NOW()
+          AND executed_by IS NOT NULL
+          -- this rule's own text is not a bulk dump
+          AND lower(coalesce(statement_text, '')) NOT LIKE '%hash_shards%'
+        GROUP BY executed_by, coalesce(client_application, 'unknown'), date_trunc('HOUR', start_time)
+      ),
+      p AS (
+        SELECT executed_by, percentile(statements, 0.99) AS p99_statements, percentile(rows_out, 0.99) AS p99_rows
+        FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS GROUP BY executed_by
+      ),
+      c AS (SELECT DISTINCT executed_by, client FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS)
+      SELECT h.last_time AS event_time, h.executed_by AS actor,
+             CASE WHEN h.executed_by RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+             h.client AS client, h.hr AS hr, h.statements AS statements, h.warehouses AS warehouses,
+             h.rows_out AS rows_out, h.bytes_read AS bytes_read, h.hash_shards AS hash_shards,
+             c.client IS NULL AS new_client, round(coalesce(p.p99_statements, 0), 1) AS p99_statements
+      FROM h
+      LEFT JOIN p ON p.executed_by = h.executed_by
+      LEFT JOIN c ON c.executed_by = h.executed_by AND c.client = h.client
+      WHERE IN_TIMERANGE(h.last_time)
+        AND ((c.client IS NULL AND h.statements >= 20)
+             OR h.statements > greatest(500, 10 * coalesce(p.p99_statements, 0))
+             OR (h.rows_out > 10 * coalesce(p.p99_rows, 0) AND h.statements >= 20)
+             OR h.hash_shards >= 10)
+output:
+  summary: '{actor}: {statements} statements through {client} (new client: {new_client}), {rows_out} rows, {hash_shards} hash-sharded'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    client: '{client}'
+    hr: '{hr}'
+    statements: '{statements}'
+    warehouses: '{warehouses}'
+    rows_out: '{rows_out}'
+    bytes_read: '{bytes_read}'
+    hash_shards: '{hash_shards}'
+    new_client: '{new_client}'
+    p99_statements: '{p99_statements}'
+  default_context: false
+runbook: |
+  1. Is the client a new BI tool, driver or job for this principal? Ask the owner.
+  2. Find how the principal signed in around hr (token logins, source IP) and which tables it read (table_lineage).
+  3. If not explained, revoke the credential; estimate what left from rows_out and the tables read.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: sql_burst_new_client_or_volume
