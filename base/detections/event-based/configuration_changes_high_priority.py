@@ -72,27 +72,27 @@ def configuration_changes_high_priority(earliest:str = None, latest: str = None)
     earliest = earliest or current_timestamp() - expr("INTERVAL 24 hours")
     latest = latest or current_timestamp()
 
+    # One workspaceConfEdit can carry several settings: workspaceConfKeys and workspaceConfValues
+    # are comma-joined in matching positions (e.g. "enableProjectsAllowList,projectsAllowListPermissions"
+    # / "false,ALL_REPOS"). Comparing the whole key string with "=" let a security setting changed in
+    # the same request as another one through, so pair keys and values by position. Values are not
+    # escaped (a list setting's value can contain a comma), so they are paired only when the key and
+    # value token counts match; otherwise the key is still reported, with its value unknown.
+    disables_control = expr("""exists(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists')
+                                              AND lower(c.value) = 'false')""")
+    key_changed = lambda key: expr(f"""exists(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = '{key}')""")
+
     df = spark.table("system.access.audit")
 
     # Filter for high-priority configuration changes
     df_filtered = df.filter(
         (col("event_time") >= earliest) & (col("event_time") <= latest) &
         (
-            # Verbose audit logging configuration changes
-            (
-                (col("service_name") == "workspace") &
-                (col("action_name") == "workspaceConfEdit") &
-                (col("request_params").getItem("workspaceConfKeys") == "enableVerboseAuditLogs")
-            ) |
-            # IP Access List Configuration changes
-            (
-                col("action_name").isin("createIpAccessList", "deleteIpAccessList", "updateIpAccessList")
-            ) |
-            # Customer-Approved Workspace Login configuration changes
-            (
-                (col("action_name") == "workspaceConfEdit") &
-                (col("request_params").getItem("workspaceConfKeys") == "customerApprovedWSLoginExpirationTime")
-            )
+            # IP Access List configuration changes
+            col("action_name").isin("createIpAccessList", "deleteIpAccessList", "updateIpAccessList") |
+            # Verbose audit logging, IP access lists on/off, Databricks employee access window,
+            # maximum token lifetime -- in any position of a (possibly bundled) workspaceConfEdit
+            ((col("action_name") == "workspaceConfEdit") & (expr("size(" + """filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays'))""" + ")") > 0))
         )
     ).select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
@@ -101,20 +101,15 @@ def configuration_changes_high_priority(earliest:str = None, latest: str = None)
         col("user_identity.email").alias("SRC_USER"),
         when(
             col("action_name") == "workspaceConfEdit",
-            concat(
-                col("request_params").getItem("workspaceConfKeys"),
-                lit(": "),
-                coalesce(col("request_params").getItem("workspaceConfValues"), lit("N/A"))
-            )
+            expr("""concat_ws(', ', transform(filter(transform(split(COALESCE(request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays')),
+                                             c -> concat(c.key, ': ', coalesce(c.value, 'N/A'))))""")
         ).when(
             col("action_name").isin("createIpAccessList", "deleteIpAccessList", "updateIpAccessList"),
             concat(lit("IP Access List - "), col("action_name"))
         ).otherwise("Unknown Configuration").alias("CONFIG_CHANGE"),
         when(
-            (col("action_name") == "workspaceConfEdit") & 
-            (col("request_params").getItem("workspaceConfKeys") == "enableVerboseAuditLogs") &
-            (col("request_params").getItem("workspaceConfValues") == "false"),
-            "CRITICAL - Audit Logging Disabled"
+            (col("action_name") == "workspaceConfEdit") & disables_control,
+            "CRITICAL - Audit Logging or IP Access Lists Disabled"
         ).when(
             col("action_name").isin("deleteIpAccessList"),
             "HIGH - IP Access List Deleted"
@@ -122,9 +117,11 @@ def configuration_changes_high_priority(earliest:str = None, latest: str = None)
             col("action_name").isin("createIpAccessList", "updateIpAccessList"),
             "MEDIUM - IP Access List Modified"
         ).when(
-            (col("action_name") == "workspaceConfEdit") & 
-            (col("request_params").getItem("workspaceConfKeys") == "customerApprovedWSLoginExpirationTime"),
+            (col("action_name") == "workspaceConfEdit") & key_changed("customerApprovedWSLoginExpirationTime"),
             "MEDIUM - Change to Databricks Employee Access Config"
+        ).when(
+            (col("action_name") == "workspaceConfEdit") & key_changed("maxTokenLifetimeDays"),
+            "MEDIUM - Maximum Token Lifetime Changed"
         ).otherwise("MEDIUM - Configuration Change").alias("SEVERITY"),
         col("audit_level").alias("AUDIT_LEVEL"),
         col("source_ip_address").alias("SRC_IP"),

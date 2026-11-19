@@ -179,8 +179,8 @@ COMMENT 'Changes to the enableVerboseAuditLogs workspace setting, both disables 
 RETURN
   SELECT
     a.event_time,
-    a.request_params['workspaceConfValues'] AS set_to,
-    CASE WHEN lower(COALESCE(a.request_params['workspaceConfValues'], '')) = 'false'
+    try_element_at(filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = 'enableVerboseAuditLogs'), 1).value AS set_to,
+    CASE WHEN lower(COALESCE(try_element_at(filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = 'enableVerboseAuditLogs'), 1).value, '')) = 'false'
          THEN 'CRITICAL - audit logging disabled, visibility gap starts here'
          ELSE 'INFO - audit logging enabled' END,
     CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,
@@ -190,7 +190,11 @@ RETURN
     a.user_agent
   FROM system.access.audit AS a
   WHERE a.action_name = 'workspaceConfEdit'
-    AND a.request_params['workspaceConfKeys'] = 'enableVerboseAuditLogs'
+    -- Keys and values are comma-joined in matching positions when one request changes
+    -- several settings; match the key anywhere in the list, not the whole string.
+    -- Values are not escaped (a list value can contain a comma), so a value is paired with its
+    -- key only when the token counts match; otherwise it is reported as unknown (NULL).
+    AND exists(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = 'enableVerboseAuditLogs')
     AND a.event_time BETWEEN start_time AND end_time;
 
 -- --------------------------------------------------------------------------

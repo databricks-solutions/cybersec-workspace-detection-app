@@ -182,7 +182,7 @@ RETURNS TABLE (
   user_agent     STRING    COMMENT 'Client used',
   request_params MAP<STRING, STRING> COMMENT 'Raw payload, for evidence'
 )
-COMMENT 'Security-weakening configuration changes: verbose audit logging disabled, IP access list modifications, and Databricks employee access window changes. MITRE T1484. Audit logging disabled ranks CRITICAL because it blinds every other detection. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging.'
+COMMENT 'Security-weakening configuration changes: verbose audit logging disabled, IP access lists turned off or modified, Databricks employee access window changes and maximum token lifetime changes. A single workspaceConfEdit can change several settings at once (comma-joined keys and values in matching positions); every setting in the request is examined, so a security setting bundled with another change is still caught. MITRE T1484, T1562. Audit logging disabled and IP access lists disabled rank CRITICAL: the first blinds every other detection, the second removes the network control for the whole workspace. Use for: what security settings changed, show me configuration changes, did anyone disable audit logging, were IP access lists turned off, security posture changes, config changelog, who changed workspace settings, evasion activity, verbose audit logging.'
 RETURN
   SELECT
     a.event_time,
@@ -190,9 +190,9 @@ RETURN
     CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,
     a.user_identity.email,
     CASE
-      WHEN a.action_name = 'workspaceConfEdit' THEN CONCAT(
-        a.request_params['workspaceConfKeys'], ': ',
-        COALESCE(a.request_params['workspaceConfValues'], 'N/A'))
+      WHEN a.action_name = 'workspaceConfEdit' THEN concat_ws(', ', transform(
+        filter(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays')),
+        c -> concat(c.key, ': ', coalesce(c.value, 'N/A'))))
       WHEN a.action_name IN ('createIpAccessList', 'updateIpAccessList', 'deleteIpAccessList')
         THEN CONCAT('IP Access List ', a.action_name, ' (id ',
                     COALESCE(a.request_params['ipAccessListId'], 'unknown'), ')')
@@ -200,15 +200,17 @@ RETURN
     END,
     CASE
       WHEN a.action_name = 'workspaceConfEdit'
-       AND a.request_params['workspaceConfKeys'] = 'enableVerboseAuditLogs'
-       AND lower(a.request_params['workspaceConfValues']) = 'false'
-        THEN 'CRITICAL - Audit Logging Disabled'
+       AND exists(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists') AND lower(c.value) = 'false')
+        THEN 'CRITICAL - Audit Logging or IP Access Lists Disabled'
       WHEN a.action_name = 'deleteIpAccessList' THEN 'HIGH - IP Access List Deleted'
       WHEN a.action_name IN ('createIpAccessList', 'updateIpAccessList')
         THEN 'MEDIUM - IP Access List Modified'
       WHEN a.action_name = 'workspaceConfEdit'
-       AND a.request_params['workspaceConfKeys'] = 'customerApprovedWSLoginExpirationTime'
+       AND exists(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = 'customerApprovedWSLoginExpirationTime')
         THEN 'MEDIUM - Change to Databricks Employee Access Config'
+      WHEN a.action_name = 'workspaceConfEdit'
+       AND exists(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key = 'maxTokenLifetimeDays')
+        THEN 'MEDIUM - Maximum Token Lifetime Changed'
       ELSE 'MEDIUM - Configuration Change'
     END,
     a.audit_level,
@@ -218,12 +220,9 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.event_time BETWEEN start_time AND end_time
     AND (
-      (a.service_name = 'workspace'
-        AND a.action_name = 'workspaceConfEdit'
-        AND a.request_params['workspaceConfKeys'] = 'enableVerboseAuditLogs')
-      OR a.action_name IN ('createIpAccessList', 'updateIpAccessList', 'deleteIpAccessList')
+      a.action_name IN ('createIpAccessList', 'updateIpAccessList', 'deleteIpAccessList')
       OR (a.action_name = 'workspaceConfEdit'
-        AND a.request_params['workspaceConfKeys'] = 'customerApprovedWSLoginExpirationTime')
+          AND exists(transform(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ','), (k, i) -> named_struct('key', trim(k), 'value', CASE WHEN size(split(COALESCE(a.request_params['workspaceConfKeys'], ''), ',')) = size(split(COALESCE(a.request_params['workspaceConfValues'], ''), ',')) THEN trim(try_element_at(split(COALESCE(a.request_params['workspaceConfValues'], ''), ','), i + 1)) END)), c -> c.key IN ('enableVerboseAuditLogs', 'enableIpAccessLists', 'customerApprovedWSLoginExpirationTime', 'maxTokenLifetimeDays')))
     );
 
 -- -----------------------------------------------------------------------------
