@@ -22,7 +22,7 @@ mitre:
      sub_technique: Create Cloud Instance}
   - {taxonomy: Enterprise, tactic: Impact, technique_id: T1496, technique: Resource Hijacking}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule: {at_least_every: 1h, enabled: false}
 batch:
   warehouse_id: "{{warehouse_id}}"

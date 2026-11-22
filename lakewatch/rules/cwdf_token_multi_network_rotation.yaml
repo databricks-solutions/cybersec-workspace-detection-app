@@ -20,7 +20,7 @@ mitre:
 - {taxonomy: Enterprise, tactic: Command and Control, technique_id: T1090, technique: Proxy,
    sub_technique_id: T1090.003, sub_technique: Multi-hop Proxy}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule: {at_least_every: 1h, enabled: false}
 timerange: {extend_lookback: 30m}
 batch:

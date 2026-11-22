@@ -18,7 +18,7 @@ mitre:
   sub_technique_id: T1098.003
   sub_technique: Additional Cloud Roles
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule:
   at_least_every: 1h
   enabled: false

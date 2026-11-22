@@ -21,7 +21,7 @@ mitre:
   - {taxonomy: Enterprise, tactic: Collection, technique_id: T1530, technique: Data from Cloud Storage}
   - {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule: {at_least_every: 1h, enabled: false}
 batch:
   warehouse_id: "{{warehouse_id}}"

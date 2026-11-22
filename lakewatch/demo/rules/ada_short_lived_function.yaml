@@ -21,7 +21,7 @@ mitre:
   - {taxonomy: Enterprise, tactic: Execution, technique_id: T1059, technique: Command and Scripting Interpreter,
      sub_technique_id: T1059.006, sub_technique: Python}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule: {at_least_every: 1h, enabled: false}
 batch:
   warehouse_id: "{{warehouse_id}}"

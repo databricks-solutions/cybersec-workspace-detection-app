@@ -18,7 +18,7 @@ mitre:
 - {taxonomy: Enterprise, tactic: Execution, technique_id: T1059, technique: Command and Scripting Interpreter}
 - {taxonomy: Enterprise, tactic: Execution, technique_id: T1651, technique: Cloud Administration Command}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule: {at_least_every: 1h, enabled: false}
 timerange: {extend_lookback: 30m}
 batch:

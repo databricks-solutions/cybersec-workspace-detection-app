@@ -11,7 +11,7 @@ objective: Identify suspicious reuse of authenticated sessions by tracking acces
   distinct public IP addresses or user agents within a 24-hour period, indicating potential session hijacking or
   credential sharing.
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 24h
   enabled: false

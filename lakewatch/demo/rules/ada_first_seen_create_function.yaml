@@ -22,7 +22,7 @@ mitre:
      sub_technique_id: T1059.006, sub_technique: Python}
   - {taxonomy: Enterprise, tactic: Persistence, technique_id: T1546, technique: Event Triggered Execution}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule: {at_least_every: 1h, enabled: false}
 batch:
   warehouse_id: "{{warehouse_id}}"

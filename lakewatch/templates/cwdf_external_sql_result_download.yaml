@@ -19,7 +19,7 @@ objective: >-
 mitre:
 - {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule: {at_least_every: 1h, enabled: false}
 timerange: {extend_lookback: 30m}
 batch:

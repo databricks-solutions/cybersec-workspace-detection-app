@@ -11,12 +11,11 @@ This guide takes a Databricks workspace with no Lakewatch to running two sets of
 
 | Requirement | Who usually has it |
 |---|---|
-| Workspace admin on the target workspace | Platform team |
-| Account admin (to create a service principal and assign it to the workspace) | Platform team |
+| Workspace admin on the target workspace (also creates the run-as service principal in Step 7) | Platform team |
 | Metastore admin (to grant read on `system.access.audit`) | Platform / data governance team |
 | Databricks CLI **v1.25.0 or later** | You |
 | Unity Catalog enabled on the workspace | — |
-| Serverless compute enabled **at the account level** | Account admin |
+| Serverless compute for jobs and serverless SQL warehouses, allowed for the Lakewatch users and the run-as service principal (Step 2) | Workspace admin; account admin only if serverless is off for the account |
 
 Your audit logs do **not** need to be ingested. Lakewatch rules read the `system.access.audit` system table directly.
 
@@ -34,17 +33,26 @@ in your region. If there is, wait — setup can hang or fail while serverless co
 brew upgrade databricks        # or: brew install databricks
 databricks -v                  # must print v1.25.0 or later
 databricks auth login --host https://<your-workspace-url> --profile <ws-profile>
+# Only if you use the account-level alternative in Step 7:
 databricks auth login --host https://accounts.cloud.databricks.com --account-id <account-id> --profile <acct-profile>
 ```
 **Check:** `databricks lakewatch --help` lists commands such as `create-rule` and `list-rules`.
 
-## Step 2 — Confirm serverless is enabled for the account
+## Step 2 — Confirm serverless compute is available
 
-As an account admin: **Accounts Console → Settings → Feature enablement → Serverless compute → On**.
-Accounts created after December 16, 2024 have it on by default.
-The *Serverless compute* toggle on the workspace **Previews** page is a different setting — it is not the one Lakewatch needs.
+Lakewatch uses two kinds of serverless compute, and they are configured separately: serverless compute for jobs
+(Lakewatch's datasource and rule jobs) and serverless SQL warehouses (the detection warehouse in Step 4).
 
-**Check:** you can start a serverless SQL warehouse in the workspace.
+- **Account:** **Accounts Console → Settings → Feature enablement → Serverless compute → On** (account admin).
+  Accounts created after December 16, 2024 have it on by default.
+- **Workspace:** a workspace admin can restrict serverless compute for users. In the workspace, open
+  **Compute → Serverless** and make sure **Default Automated Compute** is allowed for the groups that use
+  Lakewatch and for the run-as service principal (Step 7).
+- The *Serverless compute* toggle on the workspace **Previews** page is a different setting — it is not the one
+  Lakewatch needs.
+
+**Check:** as a Lakewatch user who isn't a workspace admin, you can start a serverless SQL warehouse and run a
+notebook on serverless compute.
 
 ## Step 3 — Turn on the Lakewatch preview
 
@@ -146,21 +154,24 @@ default can silently miss late-arriving events.
 Rules run as their creator by default, which breaks them if that person leaves and blocks teammates from editing them.
 Run production rules as a service principal.
 
-7.1 Create it in the account (or **Accounts Console → User management → Service principals → Add**):
+7.1 As a workspace admin, create it and add it to the workspace (**Settings → Identity and access → Service
+principals → Manage → Add service principal → Add new**), or:
+```bash
+databricks service-principals create --display-name lakewatch --active --profile <ws-profile>
+# note the "applicationId" in the output
+```
+This adds it to the workspace as a user. Never add it to the `admins` group.
+
+7.2 Alternative for account admins: create it in the account and assign it to the workspace as a **User**:
 ```bash
 databricks account service-principals create --display-name lakewatch --active --profile <acct-profile>
-# note the "id" and "applicationId" in the output
-```
-
-7.2 Assign it to the workspace as a **User** (never admin):
-```bash
 databricks account workspace-assignment update <workspace-id> <sp-id> \
   --json '{"permissions":["USER"]}' --profile <acct-profile>
 ```
 **Check:**
 ```bash
-databricks account workspace-assignment list <workspace-id> --profile <acct-profile> -o json   # sp shows "USER"
-databricks service-principals list --filter 'displayName eq "lakewatch"' --profile <ws-profile>
+databricks service-principals list --filter 'displayName eq "lakewatch"' --profile <ws-profile> -o json
+# the service principal is listed, and "groups" doesn't include admins
 ```
 
 7.3 Who may run rules as it: **Accounts Console → the service principal → Permissions**:

@@ -18,7 +18,7 @@ mitre:
   technique_id: T1562
   technique: Impair Defenses
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule:
   at_least_every: 1h
   enabled: false

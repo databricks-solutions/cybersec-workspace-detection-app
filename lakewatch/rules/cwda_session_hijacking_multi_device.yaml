@@ -10,7 +10,7 @@ fidelity: FIDELITY_INVESTIGATIVE
 objective: Identify potential session hijacking by flagging logins that switch between IPs or devices within a short
   timeframe, which may indicate credential theft, account compromise, or abuse of persistent sessions.
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 24h
   enabled: false

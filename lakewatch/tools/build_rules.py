@@ -280,7 +280,7 @@ def build(root: Path = ROOT) -> dict[str, str]:
             rule["mitre"] = mitre
         rule.update({
             "deduplication": "DEDUPLICATION_ENABLED",
-            "deduplication_time_window": "24h",
+            "deduplication_time_window": "24 hours",
             "schedule": {"at_least_every": every, "enabled": False},
             "timerange": {"extend_lookback": lookback},
             "batch": {"warehouse_id": "{{warehouse_id}}", "sql": {"query": _Literal(sql + "\n")}},

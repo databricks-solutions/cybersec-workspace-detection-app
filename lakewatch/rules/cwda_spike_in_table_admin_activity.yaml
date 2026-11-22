@@ -10,7 +10,7 @@ fidelity: FIDELITY_INVESTIGATIVE
 objective: Identify spikes in administrative command usage by calculating deviations from a user average query volume,
   helping detect potential misuse of privileges, compromised accounts, or scripted attacks.
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 24h
   enabled: false

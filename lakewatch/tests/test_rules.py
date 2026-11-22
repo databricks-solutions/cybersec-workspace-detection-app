@@ -121,3 +121,21 @@ def test_prune_disables_by_default_and_documents_alert_loss():
     assert '"--prune-delete"' in text and "deletes their alerts" in text
     prune_block = text[text.index("if a.prune or a.prune_delete:"):]
     assert prune_block.index('"enabled": False') > 0 and "if a.prune_delete:" in prune_block
+
+
+def test_deduplication_window_uses_interval_strings():
+    # Lakewatch rejects short forms such as 24h in deduplication_time_window: it must be 'automatic'
+    # or an interval string like '24 hours', '7 days' or '1 day 2 hours'. Schedules keep the short form.
+    lakewatch = Path(__file__).resolve().parents[1]
+    files = sorted([*lakewatch.glob("rules/*.yaml"), *lakewatch.glob("templates/*.yaml"),
+                    *lakewatch.glob("demo/rules/*.yaml")])
+    assert files
+    unit = r"\d+ (minute|hour|day|week)s?"
+    pattern = re.compile(rf"^(automatic|{unit}( {unit})*)$")
+    bad = {}
+    for path in files:
+        rule = yaml.safe_load(path.read_text().replace("{{", "").replace("}}", ""))
+        window = rule.get("deduplication_time_window")
+        if window is not None and not pattern.match(str(window)):
+            bad[path.name] = window
+    assert not bad, bad

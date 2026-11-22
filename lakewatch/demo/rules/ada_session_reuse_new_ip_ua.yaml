@@ -22,7 +22,7 @@ mitre:
      sub_technique: Web Session Cookie}
   - {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1539, technique: Steal Web Session Cookie}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule: {at_least_every: 1h, enabled: false}
 batch:
   warehouse_id: "{{warehouse_id}}"

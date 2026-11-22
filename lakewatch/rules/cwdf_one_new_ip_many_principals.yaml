@@ -21,7 +21,7 @@ mitre:
 - {taxonomy: Enterprise, tactic: Credential Access, technique_id: T1110, technique: Brute Force,
    sub_technique_id: T1110.004, sub_technique: Credential Stuffing}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule: {at_least_every: 1h, enabled: false}
 timerange: {extend_lookback: 30m}
 batch:

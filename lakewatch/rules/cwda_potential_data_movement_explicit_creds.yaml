@@ -18,7 +18,7 @@ mitre:
   technique_id: T1537
   technique: Transfer Data to Cloud Account
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 1h
   enabled: false

@@ -16,7 +16,7 @@ mitre:
 - {taxonomy: Enterprise, tactic: Discovery, technique_id: T1518, technique: Software Discovery,
    sub_technique_id: T1518.001, sub_technique: Security Software Discovery}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule: {at_least_every: 24h, enabled: false}
 timerange: {extend_lookback: 1h}
 batch:

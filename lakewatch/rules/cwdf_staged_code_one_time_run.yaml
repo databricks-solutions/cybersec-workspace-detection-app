@@ -18,7 +18,7 @@ mitre:
 - {taxonomy: Enterprise, tactic: Execution, technique_id: T1651, technique: Cloud Administration Command}
 - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1070, technique: Indicator Removal}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule: {at_least_every: 1h, enabled: false}
 timerange: {extend_lookback: 30m}
 batch:

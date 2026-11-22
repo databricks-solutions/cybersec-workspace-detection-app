@@ -10,7 +10,7 @@ fidelity: FIDELITY_HIGH
 objective: Identify authentication events that do not use the approved browser-based SAML SSO method, which may
   signal use of service credentials, misconfigured identity settings, or potential account compromise.
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 1h
   enabled: false

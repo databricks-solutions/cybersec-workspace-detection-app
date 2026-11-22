@@ -13,7 +13,7 @@ objective: Identify suspicious low-usage patterns of API tokens (PATs, Entra ID 
   Look for a comparatively low number per src_ip. (1 event is registered per connection attempt, whereas a genuine
   connection (auth'd) will have potentially 100's of entries)
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 24h
   enabled: false

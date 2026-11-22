@@ -24,7 +24,7 @@ mitre:
   technique_id: T1059
   technique: Command and Scripting Interpreter
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 1h
   enabled: false

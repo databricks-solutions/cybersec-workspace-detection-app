@@ -15,7 +15,7 @@ objective: >-
 mitre:
 - {taxonomy: Enterprise, tactic: Impact, technique_id: T1496, technique: Resource Hijacking}
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule: {at_least_every: 24h, enabled: false}
 timerange: {extend_lookback: 1h}
 batch:

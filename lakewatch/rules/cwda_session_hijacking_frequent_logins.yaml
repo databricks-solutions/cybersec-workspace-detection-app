@@ -10,7 +10,7 @@ fidelity: FIDELITY_INVESTIGATIVE
 objective: Identify burst login activity that may indicate session hijacking or automated attempts to reuse stolen
   credentials, by tracking users logging in from multiple IPs with unusual frequency over a short duration.
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 24h
+deduplication_time_window: 24 hours
 schedule:
   at_least_every: 24h
   enabled: false

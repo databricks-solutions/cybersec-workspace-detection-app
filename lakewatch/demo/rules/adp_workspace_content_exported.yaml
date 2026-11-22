@@ -17,7 +17,7 @@ mitre:
   sub_technique_id: T1213.003
   sub_technique: Code Repositories
 deduplication: DEDUPLICATION_ENABLED
-deduplication_time_window: 7d
+deduplication_time_window: 7 days
 schedule:
   at_least_every: 1h
   enabled: false
