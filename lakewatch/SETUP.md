@@ -261,12 +261,14 @@ grants, data movement, and more). Four replace Content library rules whose logic
 fixes, and two (bulk notebook export, workspace downloads) add thresholds the pack does not have.
 
 1. Install [`uv`](https://docs.astral.sh/uv/) (it runs the deploy script with its two dependencies).
-2. Dry run: validates every rule with the Lakewatch API, which also runs its SQL on your warehouse. Nothing is created.
+2. Dry run: validates every rule with the Lakewatch API, which also runs its SQL on your warehouse. Nothing is created
+   (if the allow-list table doesn't exist yet, the dry run validates against an empty one).
    ```bash
    uv run lakewatch/deploy.py --profile <ws-profile> --catalog <lakewatch_catalog> --schema detection \
      --warehouse-id <warehouse-id> --run-as <sp-application-id> --dry-run
    ```
-3. Deploy. Rules are created **disabled**:
+3. Deploy. Rules are created **disabled**. The first deploy also creates the allow-list table
+   `<lakewatch_catalog>.detection.cwd_allowlist` and grants the run-as service principal `SELECT` on it (see *Tuning*):
    ```bash
    uv run lakewatch/deploy.py --profile <ws-profile> --catalog <lakewatch_catalog> --schema detection \
      --warehouse-id <warehouse-id> --run-as <sp-application-id>
@@ -274,8 +276,8 @@ fixes, and two (bulk notebook export, workspace downloads) add thresholds the pa
 4. Back-test before you enable: `uv run lakewatch/tools/backtest.py --profile <ws-profile> --warehouse-id <warehouse-id>
    --windows 24 --show 5` prints what each rule would have returned in its last 24 runs on your audit table (read-only).
    Or, in Lakewatch **Query**, paste a rule's SQL (with `{{audit_table}}` replaced by `system.access.audit`) and pick a
-   time range. A rule that returns many
-   rows of known-good activity needs tuning for your environment first (see *Tuning* below).
+   time range. A rule that returns many rows of known-good activity needs tuning for your environment first (see
+   *Tuning* below).
 5. Enable the rules you reviewed, in the UI (**Detection rules** → rule → *Rule active*) or with
    `--enable --only cwda_<name>,cwda_<name>`.
 6. **Turn off the Content library rules these replace**, or you get two alerts for one event:
@@ -294,7 +296,9 @@ fixes, and two (bulk notebook export, workspace downloads) add thresholds the pa
 
 Re-running the deploy is safe. Each rule carries `managed_by` and `content_hash` annotations: unchanged rules are
 skipped, an update touches only the fields this repository owns (suppressions and the enabled state
-stay; *Run as* changes only when you pass `--run-as`). `--prune` disables rules this script created whose file is
+stay; *Run as* changes only when you pass `--run-as`). A rule someone changed outside this repository since the last
+deploy, for example by editing its SQL in the UI, is reported as `edited` and left as is, so a deploy never erases a
+change. `--force` overwrites it. `--prune` disables rules this script created whose file is
 gone; `--prune-delete` deletes them. Prefer disabling: deleting a Lakewatch rule also deletes its alerts, so pause a
 rule you want to retire and delete it only after its alerts are no longer needed.
 
@@ -314,9 +318,23 @@ GROUP BY ALL ORDER BY signals DESC
 ```
 A failed run shows on the rule's job. The usual cause is a missing grant from Step 7.6.
 
-**Tuning.** Two rules are noisy on workspaces where staff reach Databricks through a corporate egress pool or
-VPN (many addresses for one person): `cwda_session_hijacking_multi_device` and `cwda_session_hijacking_session_count`.
-Review them on your data before enabling. The rule SQL comes from this repository's Genie Agent functions
+**Tuning.** Tune the rules through the allow-list table, not by editing rule SQL. Every rule drops a finding that
+matches a row in `<lakewatch_catalog>.detection.cwd_allowlist`, so your exclusions survive rule updates from this
+repository. A row excludes a principal (email, or a service principal's application ID), a source IP, or both, for one
+rule (`rule` is the rule name without any name prefix) or for every rule (`rule = '*'`). A row with neither a
+principal nor an IP is ignored, so the table can't switch a rule off. Give every row a reason, and an expiry where it
+fits:
+```sql
+INSERT INTO <lakewatch_catalog>.detection.cwd_allowlist (rule, principal, src_ip, reason, added_by, expires_at)
+VALUES ('cwdf_anomalous_credential_minting', '<terraform-sp-application-id>', NULL,
+        'Terraform mints PATs for CI from GitHub runners', current_user(), NULL);
+```
+Exclude what you know is benign by identity, never by user agent: the caller sets the user agent. The rules that read
+command or query text skip the rule runner's own detection SQL, but only for the identity the rules run as.
+
+Two rules are noisy on workspaces where staff reach Databricks through a corporate egress pool or VPN (many addresses
+for one person): `cwda_session_hijacking_multi_device` and `cwda_session_hijacking_session_count`. Review them on your
+data before enabling. The `cwda_*` rule SQL comes from this repository's Genie Agent functions
 (`genie-agent/functions/`); to change a detection, change it there and regenerate with
 `uv run lakewatch/tools/build_rules.py`.
 

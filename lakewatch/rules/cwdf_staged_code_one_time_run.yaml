@@ -11,7 +11,7 @@ objective: >-
   submit a one-time run (or create and run a job), read the result through getRunOutput, and delete the evidence.
   Per principal and public source IP in the run window, the rule reports at least one run (submitRun, runNow) with
   staging (importNotebook, workspace import, dbfs put) or a job creation, and an output read or a delete, when the
-  principal never submitted a run from that IP in the 30 days before. CI/CD also imports and runs, but from fixed
+  principal never submitted a run from that IP in the 32 days before. CI/CD also imports and runs, but from fixed
   runner egress with a long history. False positives: a developer's first deployment from a new network; new CI
   runners.
 mitre:
@@ -39,27 +39,38 @@ batch:
       hist AS (
         SELECT DISTINCT actor, src_ip FROM s
         WHERE event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS AND action_name IN ('submitRun', 'runNow')
+      ),
+      findings AS (
+        SELECT max(s.event_time) AS event_time, s.actor AS actor,
+               CASE WHEN s.actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               s.src_ip AS src_ip,
+               count_if(s.action_name IN ('importNotebook', 'put', 'import')) AS staged,
+               count_if(s.service_name = 'jobs' AND s.action_name = 'create') AS job_creates,
+               count_if(s.action_name IN ('submitRun', 'runNow')) AS runs,
+               count_if(s.action_name = 'getRunOutput') AS outputs,
+               count_if(s.action_name IN ('deleteNotebook', 'delete')) AS deletes,
+               max_by(s.user_agent, s.event_time) AS user_agent,
+               min(s.event_time) AS first_time
+        FROM s
+        LEFT ANTI JOIN hist AS h ON h.actor = s.actor AND h.src_ip = s.src_ip
+        WHERE IN_TIMERANGE(s.event_time)
+        GROUP BY s.actor, s.src_ip
+        HAVING count_if(s.action_name IN ('submitRun', 'runNow')) > 0
+           AND (count_if(s.action_name IN ('importNotebook', 'put', 'import')) > 0
+                OR count_if(s.service_name = 'jobs' AND s.action_name = 'create') > 0)
+           AND (count_if(s.action_name = 'getRunOutput') > 0 OR count_if(s.action_name IN ('deleteNotebook', 'delete')) > 0)
       )
-      SELECT max(s.event_time) AS event_time, s.actor AS actor,
-             CASE WHEN s.actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
-             s.src_ip AS src_ip,
-             count_if(s.action_name IN ('importNotebook', 'put', 'import')) AS staged,
-             count_if(s.service_name = 'jobs' AND s.action_name = 'create') AS job_creates,
-             count_if(s.action_name IN ('submitRun', 'runNow')) AS runs,
-             count_if(s.action_name = 'getRunOutput') AS outputs,
-             count_if(s.action_name IN ('deleteNotebook', 'delete')) AS deletes,
-             max_by(s.user_agent, s.event_time) AS user_agent,
-             min(s.event_time) AS first_time
-      FROM s
-      LEFT ANTI JOIN hist AS h ON h.actor = s.actor AND h.src_ip = s.src_ip
-      WHERE IN_TIMERANGE(s.event_time)
-      GROUP BY s.actor, s.src_ip
-      HAVING count_if(s.action_name IN ('submitRun', 'runNow')) > 0
-         AND (count_if(s.action_name IN ('importNotebook', 'put', 'import')) > 0
-              OR count_if(s.service_name = 'jobs' AND s.action_name = 'create') > 0)
-         AND (count_if(s.action_name = 'getRunOutput') > 0 OR count_if(s.action_name IN ('deleteNotebook', 'delete')) > 0)
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_staged_code_one_time_run')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
 output:
-  summary: '{actor} staged code and ran it from new IP {src_ip}: {staged} staged, {runs} runs, {outputs} outputs read, {deletes} deletes'
+  summary: '{actor} staged code and ran it from new IP {src_ip}'
   event_time_column: event_time
   context:
     actor: '{actor}'

@@ -10,7 +10,7 @@ objective: >-
   SQL over a warehouse is a main exfiltration path, and system.query.history is the only system table that sees it:
   the audit log has no row for most Statement Execution API reads. Per principal (executed_by), client application
   and hour in the run window, the rule reports: at least 20 statements through a client the principal never used in
-  the 30 days before (for example the Statement Execution API from curl or urllib where its history is a JDBC/ODBC
+  the 32 days before (for example the Statement Execution API from curl or urllib where its history is a JDBC/ODBC
   driver or a BI tool); more statements than both 500 and 10 times its 99th-percentile hour; at least 20 statements
   returning more rows than 10 times its 99th-percentile hour; or at least 10 hash-sharded statements
   (pmod(xxhash64(...))), a bulk-dump pattern. All arms but the last need at least 7 days of history for the
@@ -46,22 +46,33 @@ batch:
         FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS GROUP BY executed_by
       ),
       c AS (SELECT DISTINCT executed_by, client FROM h WHERE hr < TIMERANGE_NOW() - INTERVAL 2 HOURS),
-      aged AS (SELECT executed_by FROM h GROUP BY executed_by HAVING min(hr) < TIMERANGE_NOW() - INTERVAL 7 DAYS)
-      SELECT h.last_time AS event_time, h.executed_by AS actor,
-             CASE WHEN h.executed_by RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
-             h.client AS client, h.hr AS hr, h.statements AS statements, h.warehouses AS warehouses,
-             h.rows_out AS rows_out, h.bytes_read AS bytes_read, h.hash_shards AS hash_shards,
-             c.client IS NULL AS new_client, round(coalesce(p.p99_statements, 0), 1) AS p99_statements
-      FROM h
-      LEFT JOIN p ON p.executed_by = h.executed_by
-      LEFT JOIN c ON c.executed_by = h.executed_by AND c.client = h.client
-      WHERE IN_TIMERANGE(h.last_time)
-        AND ((c.client IS NULL AND h.statements >= 20 AND h.executed_by IN (SELECT executed_by FROM aged))
-             OR (h.executed_by IN (SELECT executed_by FROM aged) AND h.statements > greatest(500, 10 * coalesce(p.p99_statements, 0)))
-             OR (h.executed_by IN (SELECT executed_by FROM aged) AND h.rows_out > 10 * coalesce(p.p99_rows, 0) AND h.statements >= 20)
-             OR h.hash_shards >= 10)
+      aged AS (SELECT executed_by FROM h GROUP BY executed_by HAVING min(hr) < TIMERANGE_NOW() - INTERVAL 7 DAYS),
+      findings AS (
+        SELECT h.last_time AS event_time, h.executed_by AS actor,
+               CASE WHEN h.executed_by RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               h.client AS client, h.hr AS hr, h.statements AS statements, h.warehouses AS warehouses,
+               h.rows_out AS rows_out, h.bytes_read AS bytes_read, h.hash_shards AS hash_shards,
+               c.client IS NULL AS new_client, round(coalesce(p.p99_statements, 0), 1) AS p99_statements
+        FROM h
+        LEFT JOIN p ON p.executed_by = h.executed_by
+        LEFT JOIN c ON c.executed_by = h.executed_by AND c.client = h.client
+        WHERE IN_TIMERANGE(h.last_time)
+          AND ((c.client IS NULL AND h.statements >= 20 AND h.executed_by IN (SELECT executed_by FROM aged))
+               OR (h.executed_by IN (SELECT executed_by FROM aged) AND h.statements > greatest(500, 10 * coalesce(p.p99_statements, 0)))
+               OR (h.executed_by IN (SELECT executed_by FROM aged) AND h.rows_out > 10 * coalesce(p.p99_rows, 0) AND h.statements >= 20)
+               OR h.hash_shards >= 10)
+      )
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_sql_burst_new_client_or_volume')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND al.src_ip IS NULL)
 output:
-  summary: '{actor}: {statements} statements through {client} (new client: {new_client}), {rows_out} rows, {hash_shards} hash-sharded'
+  summary: 'SQL burst by {actor} through {client}'
   event_time_column: event_time
   context:
     actor: '{actor}'

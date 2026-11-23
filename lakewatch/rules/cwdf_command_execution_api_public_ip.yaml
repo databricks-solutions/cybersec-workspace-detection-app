@@ -11,7 +11,7 @@ objective: >-
   actors use it to dump secrets in the cluster, steal instance credentials, mine on production clusters and pivot.
   Legitimate use is rare and comes from IDE plugins or legacy orchestration on stable IPs. The rule reports
   commandExecute calls in the run window from a public IP that is not Databricks platform egress, where the
-  (principal, IP) pair has no commandExecute in the 30 days before. Needs verbose audit logging for the command
+  (principal, IP) pair has no commandExecute in the 32 days before. Needs verbose audit logging for the command
   text, but the call itself is logged either way. False positives: a developer's IDE plugin from a new network; a
   new orchestration host.
 mitre:
@@ -56,26 +56,37 @@ batch:
         WHERE a.action_name = 'commandExecute'
           AND a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
       ),
-      hist AS (SELECT DISTINCT actor, src_ip FROM ce WHERE event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS)
-      SELECT max(c.event_time) AS event_time,
-             c.actor AS actor,
-             CASE WHEN c.actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
-             c.src_ip AS src_ip,
-             max_by(c.user_agent, c.event_time) AS user_agent,
-             concat_ws(', ', array_sort(collect_set(c.workspace_id))) AS workspaces,
-             concat_ws(', ', slice(array_sort(collect_set(c.cluster_id)), 1, 5)) AS clusters,
-             concat_ws(', ', array_sort(collect_set(c.language))) AS languages,
-             count(*) AS commands,
-             max(coalesce(c.user_agent, '') RLIKE '(?i)^(curl|python-requests|python-urllib|go-http-client|powershell)') AS raw_http_client,
-             min(c.event_time) AS first_time
-      FROM ce AS c
-      LEFT ANTI JOIN hist AS h ON h.actor = c.actor AND h.src_ip = c.src_ip
-      LEFT ANTI JOIN platform_ips AS pi ON pi.ip = c.src_ip
-      WHERE IN_TIMERANGE(c.event_time)
-        AND c.src_ip IS NOT NULL AND NOT c.src_ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])'
-      GROUP BY c.actor, c.src_ip
+      hist AS (SELECT DISTINCT actor, src_ip FROM ce WHERE event_time < TIMERANGE_NOW() - INTERVAL 2 HOURS),
+      findings AS (
+        SELECT max(c.event_time) AS event_time,
+               c.actor AS actor,
+               CASE WHEN c.actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               c.src_ip AS src_ip,
+               max_by(c.user_agent, c.event_time) AS user_agent,
+               concat_ws(', ', array_sort(collect_set(c.workspace_id))) AS workspaces,
+               concat_ws(', ', slice(array_sort(collect_set(c.cluster_id)), 1, 5)) AS clusters,
+               concat_ws(', ', array_sort(collect_set(c.language))) AS languages,
+               count(*) AS commands,
+               max(coalesce(c.user_agent, '') RLIKE '(?i)^(curl|python-requests|python-urllib|go-http-client|powershell)') AS raw_http_client,
+               min(c.event_time) AS first_time
+        FROM ce AS c
+        LEFT ANTI JOIN hist AS h ON h.actor = c.actor AND h.src_ip = c.src_ip
+        LEFT ANTI JOIN platform_ips AS pi ON pi.ip = c.src_ip
+        WHERE IN_TIMERANGE(c.event_time)
+          AND c.src_ip IS NOT NULL AND NOT c.src_ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])'
+        GROUP BY c.actor, c.src_ip
+      )
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_command_execution_api_public_ip')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
 output:
-  summary: '{actor} ran {commands} commands through the Command Execution API from new IP {src_ip}'
+  summary: 'Command Execution API used by {actor} from new IP {src_ip}'
   event_time_column: event_time
   context:
     actor: '{actor}'

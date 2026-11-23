@@ -29,22 +29,33 @@ batch:
   warehouse_id: '{{warehouse_id}}'
   sql:
     query: |
-      SELECT
-          a.event_time AS event_time,
-          a.user_identity.email AS actor,
-          a.request_params['targetUserName'] AS target_user,
-          CASE WHEN a.request_params['targetUserName'] RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-               THEN 'service_principal' ELSE 'user' END AS target_kind,
-          a.request_params['endpoint'] AS endpoint,
-          a.source_ip_address AS source_ip,
-          a.user_agent AS user_agent,
-          a.audit_level AS audit_level
-        FROM {{audit_table}} AS a
-        WHERE a.service_name = 'accounts'
-          AND a.action_name = 'add'
-          AND (CAST(a.response.status_code AS INT) = 200 OR a.response.status_code IS NULL)
-          AND a.request_params['endpoint'] IN ('adminConsole', 'scim', 'autoUserCreation')
-          AND IN_TIMERANGE(a.event_time)
+      WITH findings AS (
+        SELECT
+            a.event_time AS event_time,
+            a.user_identity.email AS actor,
+            a.request_params['targetUserName'] AS target_user,
+            CASE WHEN a.request_params['targetUserName'] RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                 THEN 'service_principal' ELSE 'user' END AS target_kind,
+            a.request_params['endpoint'] AS endpoint,
+            a.source_ip_address AS source_ip,
+            a.user_agent AS user_agent,
+            a.audit_level AS audit_level
+          FROM {{audit_table}} AS a
+          WHERE a.service_name = 'accounts'
+            AND a.action_name = 'add'
+            AND (CAST(a.response.status_code AS INT) = 200 OR a.response.status_code IS NULL)
+            AND a.request_params['endpoint'] IN ('adminConsole', 'scim', 'autoUserCreation')
+            AND IN_TIMERANGE(a.event_time)
+      )
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwda_user_account_created')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.source_ip))
 output:
   summary: '{target_kind} {target_user} created by {actor} via {endpoint}'
   event_time_column: event_time

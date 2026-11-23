@@ -10,7 +10,7 @@ objective: >-
   Testing a stolen credential everywhere it might work. Per source IP in the run window, over refused token logins
   (tokenLogin, aadTokenLogin, oidcTokenLogin, oidcTokenAuthorization, jwtLogin with 401/403) and IpAccessDenied,
   the rule reports refusals in at least 3 workspaces or at least 5 refusals, and how many principals then signed in
-  successfully from the same IP (succeeded_after > 0 raises severity). Refused Entra logins carry the object ID in
+  successfully from the same IP (succeeded_after, in the alert context: triage those first). Refused Entra logins carry the object ID in
   request_params.user with no email; both count. False positives: an expired CI credential replayed by a job at a
   steady rate (baseline it by IP).
 mitre:
@@ -48,19 +48,30 @@ batch:
                max_by(user_agent, event_time) AS user_agent
         FROM refused GROUP BY src_ip
         HAVING count(DISTINCT workspace_id) >= 3 OR count(*) >= 5
+      ),
+      findings AS (
+        SELECT s.last_refused AS event_time, s.principal_list AS actor,
+               CASE WHEN s.principals > 1 THEN 'many' ELSE 'one' END AS actor_kind,
+               s.src_ip AS src_ip, s.refused AS refused, s.workspaces AS workspaces, s.principals AS principals,
+               s.ip_acl_denials AS ip_acl_denials, s.first_refused AS first_refused, s.user_agent AS user_agent,
+               count(DISTINCT e.principal) AS succeeded_after
+        FROM spray AS s
+        LEFT JOIN ev AS e ON e.src_ip = s.src_ip AND e.status = 200 AND e.action_name <> 'IpAccessDenied'
+                         AND e.event_time > s.first_refused
+        GROUP BY s.last_refused, s.principal_list, s.principals, s.src_ip, s.refused, s.workspaces, s.ip_acl_denials,
+                 s.first_refused, s.user_agent
       )
-      SELECT s.last_refused AS event_time, s.principal_list AS actor,
-             CASE WHEN s.principals > 1 THEN 'many' ELSE 'one' END AS actor_kind,
-             s.src_ip AS src_ip, s.refused AS refused, s.workspaces AS workspaces, s.principals AS principals,
-             s.ip_acl_denials AS ip_acl_denials, s.first_refused AS first_refused, s.user_agent AS user_agent,
-             count(DISTINCT e.principal) AS succeeded_after
-      FROM spray AS s
-      LEFT JOIN ev AS e ON e.src_ip = s.src_ip AND e.status = 200 AND e.action_name <> 'IpAccessDenied'
-                       AND e.event_time > s.first_refused
-      GROUP BY s.last_refused, s.principal_list, s.principals, s.src_ip, s.refused, s.workspaces, s.ip_acl_denials,
-               s.first_refused, s.user_agent
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_refused_auth_spray')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
 output:
-  summary: '{refused} refused sign-ins from {src_ip} across {workspaces} workspaces for {principals} principals; {succeeded_after} succeeded after'
+  summary: 'Refused sign-in spray from {src_ip}'
   event_time_column: event_time
   context:
     actor: '{actor}'

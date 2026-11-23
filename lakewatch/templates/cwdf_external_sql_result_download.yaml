@@ -15,7 +15,7 @@ fidelity: FIDELITY_MEDIUM
 objective: >-
   Statement Execution API results returned as EXTERNAL_LINKS are presigned URLs to objects in the workspace's root
   storage; this is the only customer-side measure of how much left through that path. Reports a source IP outside
-  Databricks ranges and your known clients with at least 50 result-object GETs or 1 GB in the run window.
+  your known-client list with at least 50 result-object GETs or 1 GB in the run window.
 mitre:
 - {taxonomy: Enterprise, tactic: Exfiltration, technique_id: T1567, technique: Exfiltration Over Web Service}
 deduplication: DEDUPLICATION_ENABLED

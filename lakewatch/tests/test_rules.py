@@ -14,7 +14,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 RULES = sorted((ROOT / "lakewatch" / "rules").glob("*.yaml"))
-PLACEHOLDERS = {"catalog", "schema", "warehouse_id", "audit_table"}
+PLACEHOLDERS = {"catalog", "schema", "warehouse_id", "audit_table", "allowlist_table", "runner_principal"}
 SEVERITIES = {"Informational", "Low", "Medium", "High", "Critical"}
 FIDELITIES = {"FIDELITY_DEVELOPMENT", "FIDELITY_INVESTIGATIVE", "FIDELITY_MEDIUM", "FIDELITY_HIGH"}
 TACTICS = {"Reconnaissance", "Resource Development", "Initial Access", "Execution", "Persistence",
@@ -139,3 +139,86 @@ def test_deduplication_window_uses_interval_strings():
         if window is not None and not pattern.match(str(window)):
             bad[path.name] = window
     assert not bad, bad
+
+
+# Alert summaries name the entity only. Lakewatch groups signals into one alert by summary text, so a count or other
+# per-run value in the summary opens a new alert on every run. Counts belong in output.context.
+SUMMARY_TOKENS = {
+    "actor", "actor_kind", "src_ip", "source_ip", "action", "kind", "technique", "reason", "change_kind", "securable",
+    "target", "target_user", "target_kind", "client", "credential_type", "net24", "ua_family", "user_agent",
+    "trigger_action", "trigger_actor", "group_name", "auth_method", "executed_as", "endpoint", "config_change",
+    "severity", "setting_type", "grant_path", "surface", "encoding_technique", "status_code",
+}
+
+
+@pytest.mark.parametrize("path", RULES, ids=lambda p: p.stem)
+def test_summary_names_the_entity_only(path):
+    rule = load(path)
+    used = set(re.findall(r"\{(\w+)\}", rule["output"]["summary"]))
+    assert used <= SUMMARY_TOKENS, f"per-run values in the summary (move them to context): {sorted(used - SUMMARY_TOKENS)}"
+    assert used <= set(rule["output"]["context"]) | {"actor"}, "every summary value is also in context"
+
+
+@pytest.mark.parametrize("path", RULES, ids=lambda p: p.stem)
+def test_rule_applies_the_allowlist(path):
+    query = load(path)["batch"]["sql"]["query"]
+    assert "{{allowlist_table}}" in query and f"al.rule IN ('*', '{path.stem}')" in query, \
+        "every rule drops findings that match the allow-list table, keyed by its own name"
+
+
+@pytest.mark.parametrize("path", RULES, ids=lambda p: p.stem)
+def test_no_text_marker_switches_a_rule_off(path):
+    # A marker in command or query text excludes only the rule runner's own SQL (actor = {{runner_principal}}).
+    # On its own, anyone could put it in a comment and hide from the rule.
+    query = load(path)["batch"]["sql"]["query"]
+    assert not re.search(r"NOT\s+LIKE\s+'%(secret_redaction_bypass|encoding_technique|schema_searches|"
+                         r"provider_metadata_query)%'", query, re.I)
+    for marker in ("secret_redaction_bypass%", "schema_searches%", "PROVIDER_METADATA_QUERY%"):
+        for line in (i for i, l in enumerate(query.splitlines()) if f"LIKE '%{marker}'" in l):
+            window = "\n".join(query.splitlines()[max(0, line - 2):line + 1])
+            assert "{{runner_principal}}" in window, f"marker {marker!r} must be tied to the runner principal"
+
+
+# The user agent is set by the caller. In these rules it may add evidence for a finding but never drops one.
+UA_AS_EVIDENCE = {"cwdf_identity_provisioning_anomaly", "cwdf_discovery_breadth_or_novel_actions",
+                  "cwdf_suspicious_client_user_agent"}
+
+
+@pytest.mark.parametrize("path", [p for p in RULES if p.stem.startswith("cwdf_")], ids=lambda p: p.stem)
+def test_user_agent_alone_never_excludes(path):
+    if path.stem in UA_AS_EVIDENCE:
+        return
+    query = load(path)["batch"]["sql"]["query"]
+    bare = re.findall(r"AND\s+NOT\s+coalesce\(\s*[\w.]*user_agent", query, re.I)
+    assert not bare, "a user-agent exclusion must also require a private or platform source"
+
+
+def _deploy_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lw_deploy2", Path(__file__).resolve().parents[1] / "deploy.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_deploy_leaves_rules_edited_outside_the_repo_alone():
+    deploy = _deploy_module()
+    path = RULES[0]
+    rule = deploy.with_annotations(deploy.render(path, "c", "s", "w", "system.access.audit", "c.s.cwd_allowlist", "sp"))
+    remote = {**rule, "name": "rules/1", "run_as_principal": "sp", "status": {"job_id": 1}}
+    assert not deploy.edited_outside(remote), "an untouched deployed rule is not an edit"
+    edited = {**remote, "batch": {**remote["batch"], "sql": {"query": remote["batch"]["sql"]["query"] + "\n-- tuned"}}}
+    assert deploy.edited_outside(edited), "a UI edit to the SQL is detected"
+    toggled = {**remote, "schedule": {**remote["schedule"], "enabled": True}, "suppress_until_time": "2030-01-01"}
+    assert not deploy.edited_outside(toggled), "enabling or suppressing a rule is not an edit"
+    assert deploy.edited_outside({k: v for k, v in remote.items() if k != "annotations"}), "no stored hash: hands off"
+
+
+def test_deploy_renders_allowlist_and_runner():
+    deploy = _deploy_module()
+    path = next(p for p in RULES if "{{runner_principal}}" in p.read_text())
+    rule = deploy.render(path, "c", "s", "w", "system.access.audit", "c.s.cwd_allowlist", "o'brien@x.com")
+    query = rule["batch"]["sql"]["query"]
+    assert "`c`.`s`.`cwd_allowlist`" in query and "'o''brien@x.com'" in query and "{{" not in query.replace("{{secrets/", "")
+    empty = deploy.render(path, "c", "s", "w", "system.access.audit")["batch"]["sql"]["query"]
+    assert "WHERE 1 = 0" in empty, "without a table (dry run before it exists) the allow-list is empty"

@@ -10,7 +10,7 @@ objective: >-
   Credential-dump replay and token-pool validation. Owners do not share a hosting IP with each other's tokens; an
   actor holding a batch of leaked credentials does. The rule takes successful token and OAuth sign-ins (tokenLogin
   except cluster-internal PATs, oidcTokenAuthorization, mintOAuthToken, aadTokenLogin, in-house OAuth client
-  authentication) from public IPs in the run window, keeps the /24 networks with no sign-in in the 30 days before,
+  authentication) from public IPs in the run window, keeps the /24 networks with no sign-in in the 32 days before,
   and reports an IP that signed in as at least 3 distinct principals or reached at least 5 workspaces. Many such
   waves are validation only (a sign-in and nothing else): the alert is still the start of the incident. False
   positives: a new corporate NAT or VPN exit, a newly connected SaaS integration (ETL, BI or monitoring vendor) or
@@ -53,23 +53,34 @@ batch:
         SELECT f.* FROM first_in_window AS f
         LEFT ANTI JOIN auth AS h
           ON h.net24 = f.net24 AND h.event_time < f.first_time AND h.event_time >= f.first_time - INTERVAL 30 DAYS
+      ),
+      findings AS (
+        SELECT max(w.event_time) AS event_time,
+               concat_ws(', ', slice(array_sort(collect_set(w.principal)), 1, 10)) AS actor,
+               'many' AS actor_kind,
+               w.src_ip AS src_ip,
+               count(DISTINCT w.principal) AS principals,
+               count(DISTINCT w.credential) AS credentials,
+               count(DISTINCT w.workspace_id) AS workspaces,
+               count(*) AS sign_ins,
+               min(w.event_time) AS first_time,
+               concat_ws(', ', slice(array_sort(collect_set(w.user_agent)), 1, 5)) AS user_agents
+        FROM window_auth AS w
+        JOIN new_nets AS n ON n.net24 = w.net24
+        GROUP BY w.src_ip
+        HAVING count(DISTINCT w.principal) >= 3 OR count(DISTINCT w.workspace_id) >= 5
       )
-      SELECT max(w.event_time) AS event_time,
-             concat_ws(', ', slice(array_sort(collect_set(w.principal)), 1, 10)) AS actor,
-             'many' AS actor_kind,
-             w.src_ip AS src_ip,
-             count(DISTINCT w.principal) AS principals,
-             count(DISTINCT w.credential) AS credentials,
-             count(DISTINCT w.workspace_id) AS workspaces,
-             count(*) AS sign_ins,
-             min(w.event_time) AS first_time,
-             concat_ws(', ', slice(array_sort(collect_set(w.user_agent)), 1, 5)) AS user_agents
-      FROM window_auth AS w
-      JOIN new_nets AS n ON n.net24 = w.net24
-      GROUP BY w.src_ip
-      HAVING count(DISTINCT w.principal) >= 3 OR count(DISTINCT w.workspace_id) >= 5
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_one_new_ip_many_principals')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
 output:
-  summary: 'New IP {src_ip} signed in as {principals} principals in {workspaces} workspaces'
+  summary: 'New IP {src_ip} signed in as several principals'
   event_time_column: event_time
   context:
     actor: '{actor}'

@@ -6,9 +6,11 @@
 
     uv run lakewatch/deploy.py --profile <cli-profile> --catalog <lakewatch catalog> \\
         --schema detection --warehouse-id <id> [--run-as <sp-application-id>] \\
-        [--enable | --disable] [--only NAME,...] [--prune | --prune-delete] [--dry-run] [--name-prefix test_]
+        [--enable | --disable] [--only NAME,...] [--prune | --prune-delete] [--dry-run] [--force] \\
+        [--name-prefix test_] [--allowlist-table <catalog.schema.table>]
 
-Each rule file is rendered ({{catalog}}, {{schema}}, {{warehouse_id}}, {{audit_table}}), checked with
+Each rule file is rendered ({{catalog}}, {{schema}}, {{warehouse_id}}, {{audit_table}}, {{allowlist_table}},
+{{runner_principal}}), checked with
 the rules API dry run (rules:validateRule, which also runs the SQL on the warehouse), then created,
 or updated when its content changed. Deploy is idempotent and safe to re-run:
 
@@ -18,6 +20,12 @@ or updated when its content changed. Deploy is idempotent and safe to re-run:
 - An update sends an explicit update_mask with only the top-level fields this repository owns.
   Fields an analyst sets in the Lakewatch UI (suppress_until_time, run_as_principal) are not in the
   mask, and the rule keeps its current enabled state unless --enable/--disable is given.
+- A rule changed outside this repository since the last deploy (for example edited in the Lakewatch UI) is
+  reported as "edited" and left alone, so a deploy never erases a customer's change. --force overwrites it.
+  Tune rules through the allow-list table instead: every rule drops findings that match a row in it, and
+  deploy creates it (default <catalog>.<schema>.cwd_allowlist) if it is missing.
+- {{runner_principal}} is the identity the rules run as (--run-as, else the rule's current run-as, else you).
+  Rules that read command or query text exclude the rule runner's own detection SQL only for that identity.
 - --prune disables rules in the schema that carry managed_by=cybersec-workspace-detection-app but no
   longer have a file here. Disabling keeps the rule's alerts and history. --prune-delete deletes
   those rules instead; deleting a Lakewatch rule also deletes its alerts. Rules this script did not
@@ -52,9 +60,26 @@ def quote_table(name: str) -> str:
     return ".".join(f"`{p.strip('`')}`" for p in name.split("."))
 
 
-def render(path: Path, catalog: str, schema: str, warehouse_id: str, audit_table: str) -> dict:
+EMPTY_ALLOWLIST = ("(SELECT CAST(NULL AS STRING) AS rule, CAST(NULL AS STRING) AS principal, "
+                   "CAST(NULL AS STRING) AS src_ip, CAST(NULL AS TIMESTAMP) AS expires_at WHERE 1 = 0)")
+ALLOWLIST_DDL = (
+    "CREATE TABLE IF NOT EXISTS {table} ("
+    "rule STRING COMMENT 'Rule name without any name prefix, or * for every rule', "
+    "principal STRING COMMENT 'Actor to exclude: email or service principal application ID. NULL matches any', "
+    "src_ip STRING COMMENT 'Source IP to exclude. NULL matches any (set principal or src_ip, or both)', "
+    "reason STRING COMMENT 'Why this activity is expected', "
+    "added_by STRING, "
+    "expires_at TIMESTAMP COMMENT 'Stop excluding after this time. NULL = no expiry') "
+    "COMMENT 'Allow-list for the cybersec-workspace-detection-app Lakewatch rules. Tune here, not in rule SQL, "
+    "so rule updates keep your exclusions.'")
+
+
+def render(path: Path, catalog: str, schema: str, warehouse_id: str, audit_table: str,
+           allowlist_table: str = "", runner_principal: str = "") -> dict:
     values = {"catalog": catalog, "schema": schema, "warehouse_id": warehouse_id,
-              "audit_table": quote_table(audit_table)}
+              "audit_table": quote_table(audit_table),
+              "allowlist_table": quote_table(allowlist_table) if allowlist_table else EMPTY_ALLOWLIST,
+              "runner_principal": runner_principal.replace("'", "''")}
     text = re.sub(r"\{\{\s*(\w+)\s*\}\}", lambda m: values[m.group(1)], path.read_text())
     return yaml.safe_load(text)
 
@@ -86,6 +111,25 @@ def mask_for(rule: dict) -> list[str]:
     return [f for f in OWNED if f in rule]
 
 
+def edited_outside(found: dict) -> bool:
+    """True when a deployed rule no longer matches the content hash this script stored on it."""
+    stored = (found.get("annotations") or {}).get("content_hash")
+    current = content_hash({k: v for k, v in found.items() if k in IDENTITY or k in OWNED})
+    return stored is None or stored != current
+
+
+def run_sql(w, warehouse_id: str, statement: str) -> str | None:
+    """Run one statement on the warehouse; return an error message, or None on success."""
+    from databricks.sdk.service.sql import StatementState
+
+    res = w.statement_execution.execute_statement(statement=statement, warehouse_id=warehouse_id, wait_timeout="50s")
+    while res.status.state in (StatementState.PENDING, StatementState.RUNNING):
+        res = w.statement_execution.get_statement(res.statement_id)
+    if res.status.state == StatementState.SUCCEEDED:
+        return None
+    return res.status.error.message if res.status.error else str(res.status.state)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", required=True, help="Databricks CLI profile of the Lakewatch workspace")
@@ -104,6 +148,10 @@ def main() -> int:
     prune.add_argument("--prune-delete", action="store_true",
                        help=f"delete {MANAGED_BY} rules that have no file here (also deletes their alerts)")
     ap.add_argument("--dry-run", action="store_true", help="validate only; create, update and delete nothing")
+    ap.add_argument("--force", action="store_true",
+                    help="also overwrite rules that were changed outside this repository since the last deploy")
+    ap.add_argument("--allowlist-table", default="",
+                    help="allow-list table the rules read (default <catalog>.<schema>.cwd_allowlist)")
     ap.add_argument("--run-as", default="",
                     help="run the rules as this service principal (application ID); see SETUP.md step 7")
     ap.add_argument("--name-prefix", default="",
@@ -112,7 +160,9 @@ def main() -> int:
 
     from databricks.sdk import WorkspaceClient
 
-    api = WorkspaceClient(profile=a.profile).api_client
+    w = WorkspaceClient(profile=a.profile)
+    api = w.api_client
+    allowlist = a.allowlist_table or f"{a.catalog}.{a.schema}.cwd_allowlist"
     only = {x.strip() for x in a.only.split(",") if x.strip()}
     files = sorted(p for p in RULES_DIR.glob("*.yaml") if not only or p.stem in only)
     if only - {p.stem for p in files}:
@@ -120,17 +170,39 @@ def main() -> int:
         return 2
     existing = {(r.get("schema_name"), r.get("rule_name")): r for r in list_rules(api, a.catalog)}
     set_enabled = a.enable or a.disable
-    counts = {"created": 0, "updated": 0, "unchanged": 0, "pruned": 0, "failed": 0}
+    counts = {"created": 0, "updated": 0, "unchanged": 0, "edited": 0, "pruned": 0, "failed": 0}
+
+    table_ok = w.tables.exists(allowlist).table_exists
+    if not table_ok and not a.dry_run:
+        err = run_sql(w, a.warehouse_id, ALLOWLIST_DDL.format(table=quote_table(allowlist)))
+        if err:
+            print(f"cannot create the allow-list table {allowlist}: {err[:300]}", file=sys.stderr)
+            return 1
+        table_ok = True
+        print(f"created   allow-list table {allowlist}")
+    elif not table_ok:
+        print(f"note      allow-list table {allowlist} does not exist yet; a real run creates it (dry run "
+              "validates against an empty allow-list)")
+    if table_ok and a.run_as and not a.dry_run:
+        err = run_sql(w, a.warehouse_id, f"GRANT SELECT ON TABLE {quote_table(allowlist)} TO `{a.run_as}`")
+        if err:
+            print(f"warning   could not grant SELECT on {allowlist} to {a.run_as}: {err[:200]}", file=sys.stderr)
+    me = None
 
     for path in files:
-        rule = render(path, a.catalog, a.schema, a.warehouse_id, a.audit_table)
+        found = existing.get((a.schema, a.name_prefix + path.stem))
+        runner = a.run_as or (found or {}).get("run_as_principal") or ""
+        if not runner:
+            me = me or w.current_user.me().user_name
+            runner = me
+        rule = render(path, a.catalog, a.schema, a.warehouse_id, a.audit_table,
+                      allowlist if table_ok else "", runner)
         rule["rule_name"] = a.name_prefix + rule["rule_name"]
         if a.run_as:
             rule["run_as_principal"] = a.run_as
         rule = with_annotations(rule)
         if set_enabled:
             rule["schedule"] = {**rule["schedule"], "enabled": bool(a.enable)}
-        found = existing.get((a.schema, rule["rule_name"]))
         try:
             if found is None:
                 api.do("POST", f"{BASE}/rules:validateRule", body={"rule": rule, "warehouse": a.warehouse_id})
@@ -139,14 +211,19 @@ def main() -> int:
                 counts["created"] += 1
                 print(f"created   {rule['rule_name']}" + (" (dry run)" if a.dry_run else ""))
                 continue
+            if (found.get("annotations") or {}).get("managed_by") not in (None, MANAGED_BY):
+                print(f"skipped   {rule['rule_name']}: managed by {found['annotations']['managed_by']}")
+                continue
+            if edited_outside(found) and not a.force:
+                counts["edited"] += 1
+                print(f"edited    {rule['rule_name']}: changed outside this repository since the last deploy; "
+                      "left as is (--force overwrites it)")
+                continue
             same = (found.get("annotations") or {}).get("content_hash") == rule["annotations"]["content_hash"]
             same_state = not set_enabled or bool((found.get("schedule") or {}).get("enabled")) == bool(a.enable)
             if same and same_state:
                 counts["unchanged"] += 1
                 print(f"unchanged {rule['rule_name']}")
-                continue
-            if (found.get("annotations") or {}).get("managed_by") not in (None, MANAGED_BY):
-                print(f"skipped   {rule['rule_name']}: managed by {found['annotations']['managed_by']}")
                 continue
             if not set_enabled:  # keep the state the rule has now
                 rule["schedule"] = {**rule["schedule"], "enabled": bool((found.get("schedule") or {}).get("enabled"))}

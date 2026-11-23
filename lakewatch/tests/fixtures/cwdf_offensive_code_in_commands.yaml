@@ -1,6 +1,8 @@
 # Planted: an API command stealing instance-role credentials from IMDS; a reverse shell in a notebook.
-# Also planted: base64 of a secret printed. Near misses: subprocess for pip install; a normal secret read; a job that
-# base64-compresses JSON in the same cell as a secret read.
+# Also planted: base64 of a secret printed, including one hidden behind the old self-exclusion marker in a comment.
+# Excluded: the rule runner's own detection SQL (marker plus runner identity) and an allow-listed principal.
+# Near misses: subprocess for pip install; a normal secret read; a job that base64-compresses JSON in the same
+# cell as a secret read.
 rows:
 - t: -20
   service_name: data-plane-router
@@ -67,6 +69,38 @@ rows:
       pw = dbutils.secrets.get(''etl'', ''api'')
 
       payload = base64.b64encode(gzip.compress(json.dumps(rows).encode()))'
+- t: -20
+  service_name: jobs
+  action_name: runCommand
+  email: lakewatch-rule-runner
+  ip: 10.0.0.12
+  request_params:
+    commandText: '-- the rule runner''s own detection SQL
+
+      SELECT CASE WHEN code RLIKE ''b64encode[(]dbutils[.]secrets[.]get[(]'' THEN ''secret_redaction_bypass'' END -- base64.b64encode(dbutils.secrets.get(''a'', ''b''))'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: mallory@corp.example
+  ip: 10.0.0.13
+  request_params:
+    commandText: '# encoding_technique secret_redaction_bypass (a comment no longer hides the code)
+
+      import base64
+
+      print(base64.b64encode(dbutils.secrets.get(''prod'', ''db_password'').encode()))'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: allowlisted@corp.example
+  ip: 10.0.0.14
+  request_params:
+    commandText: 'import base64
+
+      print(base64.b64encode(dbutils.secrets.get(''red-team'', ''canary'').encode()))'
+allowlist:
+- rule: cwdf_offensive_code_in_commands
+  principal: allowlisted@corp.example
 expect:
   hits:
   - technique: imds_credential
@@ -75,6 +109,10 @@ expect:
     actor: eve@corp.example
   - technique: secret_redaction_bypass
     actor: leak@corp.example
+  - technique: secret_redaction_bypass
+    actor: mallory@corp.example
   misses:
+  - actor: lakewatch-rule-runner
+  - actor: allowlisted@corp.example
   - actor: dev@corp.example
   - actor: etl@corp.example

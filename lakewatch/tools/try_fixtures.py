@@ -117,12 +117,27 @@ def lineage_row_sql(r: dict, anchor: datetime) -> str:
             f"{ts(t)} AS event_time")
 
 
+RUNNER = "lakewatch-rule-runner"  # stands in for {{runner_principal}} unless a fixture sets runner_principal
+
+
+def allowlist_sql(rows: list[dict]) -> str:
+    """Allow-list rows for a fixture; an empty allow-list when the fixture has none."""
+    if not rows:
+        return ("SELECT CAST(NULL AS STRING) AS rule, CAST(NULL AS STRING) AS principal, CAST(NULL AS STRING) AS src_ip, "
+                "CAST(NULL AS TIMESTAMP) AS expires_at WHERE 1 = 0")
+    return " UNION ALL ".join(
+        f"SELECT {lit(r.get('rule', '*'))} AS rule, {lit(r.get('principal'))} AS principal, {lit(r.get('src_ip'))} AS src_ip, "
+        "CAST(NULL AS TIMESTAMP) AS expires_at" for r in rows)
+
+
 def statement(rule: dict, fixture: dict, anchor: datetime) -> str:
     """The rule query over fixture rows. `rows` stand in for the audit table; optional `query_rows`
     (executed_by, client_application, statement_text, ...) stand in for system.query.history."""
     rows = " UNION ALL ".join(row_sql(r, anchor) for r in fixture.get("rows") or [{"action_name": "none", "t": -99999}])
-    query = rule["batch"]["sql"]["query"].replace("{{audit_table}}", "fixture_audit")
-    ctes = [f"fixture_audit AS ({rows})"]
+    query = (rule["batch"]["sql"]["query"].replace("{{audit_table}}", "fixture_audit")
+             .replace("{{allowlist_table}}", "fixture_allowlist")
+             .replace("{{runner_principal}}", fixture.get("runner_principal", RUNNER)))
+    ctes = [f"fixture_audit AS ({rows})", "fixture_allowlist AS (" + allowlist_sql(fixture.get("allowlist") or []) + ")"]
     for key, fn, table, name in (("serving_rows", serving_row_sql, r"system\.serving\.endpoint_usage", "fixture_endpoint_usage"),
                                  ("lineage_rows", lineage_row_sql, r"system\.access\.table_lineage", "fixture_table_lineage")):
         if fixture.get(key):

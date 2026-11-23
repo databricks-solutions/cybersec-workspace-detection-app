@@ -70,18 +70,18 @@ SPECS: dict[str, dict] = {
         kind="event", summary="COPY INTO with inline credentials by {executed_as}"),
     "session_hijacking_frequent_logins": dict(
         nb="behavioral/session_hijacking_frequent_logins", fn="detect_session_multi_ip_logins", kind="agg",
-        summary="{actor} logged in from {distinct_ips} public IPs"),
+        summary="{actor} logged in from several public IPs"),
     "session_hijacking_multi_device": dict(
         nb="behavioral/session_hijacking_multi_device", fn="detect_session_multi_device", kind="agg",
-        summary="{credential_type} credential of {actor} used from {distinct_ips} IPs"),
+        summary="{credential_type} credential of {actor} used from several IPs"),
     "session_hijacking_session_count": dict(
         nb="behavioral/session_hijacking_session_count", fn="detect_session_high_count_per_ip", kind="agg",
-        summary="{distinct_sessions} credentials of {distinct_actors} identities from {source_ip}"),
+        summary="Credentials of several identities used from {source_ip}"),
     "spike_in_table_admin_activity": dict(
         nb="behavioral/spike_in_table_admin_activity", fn="detect_admin_sql_activity_spike", kind="agg",
-        summary="{commands} admin SQL statements by {actor}"),
+        summary="Spike in admin SQL statements by {actor}"),
     "token_scanning_activity": dict(nb="behavioral/token_scanning_activity", fn="detect_token_scanning_activity",
-                                    kind="agg", summary="{credential_type} token used from {distinct_ips} IPs"),
+                                    kind="agg", summary="{credential_type} token used from many IPs"),
     "user_account_created": dict(nb="behavioral/user_account_created", fn="detect_user_account_created",
                                  kind="event", summary="{target_kind} {target_user} created by {actor} via {endpoint}"),
     "user_password_changed": dict(nb="behavioral/user_password_changed", fn="detect_user_password_changed",
@@ -95,17 +95,17 @@ SPECS: dict[str, dict] = {
         kind="event", where="lower(set_to) = 'false'", summary="Verbose audit logging disabled by {actor}"),
     "secret_scanning_activity": dict(nb="behavioral/secret_scanning_activity", fn="detect_secrets_discovery",
                                      kind="agg",
-                                     summary="{actor} enumerated secrets and read {secrets_used} ({secrets_refused} refused)"),
+                                     summary="{actor} enumerated and read secrets"),
     "configuration_changes_account_level": dict(
         nb="event-based/configuration_changes_account_level", fn="detect_config_changes_account_level",
         kind="event", summary="{action} {setting_type} by {actor} ({severity})"),
     # ---- volume functions with a rule threshold
     "bulk_notebook_export": dict(nb="behavioral/bulk_notebook_export", fn="detect_bulk_notebook_export",
-                                 kind="agg", summary="{actor}: {analysis}"),
+                                 kind="agg", summary="Workspace downloads above baseline by {actor}"),
     "potential_data_movement_workspace_downloads": dict(
         nb="behavioral/potential_data_movement_workspace_downloads", fn="detect_data_movement_downloads",
         kind="agg", where="foreign_homes >= 3 OR distinct_objects >= 200",
-        summary="{actor}: {distinct_objects} objects via {action} ({foreign_homes} other users' homes)"),
+        summary="Bulk export via {action} by {actor}"),
 }
 
 TACTICS = {"TA0001": "Initial Access", "TA0002": "Execution", "TA0003": "Persistence",
@@ -215,6 +215,56 @@ def alias_outer_select(body: str, columns: list[str]) -> str:
     return body[:sel] + " " + prefix + ",\n    ".join(named) + "\n  " + body[frm:]
 
 
+# Allow-list step: every rule drops findings that match a row in {{allowlist_table}}.
+def _main_select_pos(sql: str) -> int:
+    depth, i, n = 0, 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c == "'":
+            i += 1
+            while i < n and sql[i] != "'":
+                i += 2 if sql[i] == "\\" else 1
+        elif sql.startswith("--", i):
+            i = sql.find("\n", i)
+            if i < 0:
+                break
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif depth == 0 and re.match(r"(?i)select\b", sql[i:i + 7]) and (i == 0 or not (sql[i - 1].isalnum() or sql[i - 1] == "_")):
+            return i
+        i += 1
+    raise ValueError("no top-level SELECT")
+
+def with_allowlist(sql: str, rule: str, has_actor: bool, has_ip: bool) -> str:
+    sql = sql.rstrip().rstrip(";")
+    pos = _main_select_pos(sql)
+    head, main = sql[:pos].rstrip(), sql[pos:]
+    conds = ["al.rule IN ('*', '%s')" % rule,
+             "(al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())",
+             "(al.principal IS NOT NULL OR al.src_ip IS NOT NULL)",
+             "(al.principal IS NULL OR al.principal = f.actor)" if has_actor else "al.principal IS NULL",
+             "(al.src_ip IS NULL OR al.src_ip = f.src_ip)" if has_ip else "al.src_ip IS NULL"]
+    body = "\n".join("  " + l if l else l for l in main.splitlines())
+    tail = ("findings AS (\n" + body + "\n)\n"
+            "-- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)\n"
+            "SELECT f.* FROM findings AS f\n"
+            "WHERE NOT EXISTS (\n  SELECT 1 FROM {{allowlist_table}} AS al\n  WHERE " + "\n    AND ".join(conds) + ")")
+    return (head + ",\n" + tail) if head else ("WITH " + tail)
+
+
+# The Genie functions skip their own detection text by a marker in the command or query text. Anyone can put the
+# marker in a comment, so in the Lakewatch rules it counts only for the identity the rules run as.
+RUNNER_MARKERS = [
+    ("AND lower(q.statement_text) NOT LIKE '%encoding_technique%'",
+     "AND NOT (q.executed_by = '{{runner_principal}}' AND lower(q.statement_text) LIKE '%encoding_technique%')"),
+    ("WHERE lower(COALESCE(a.cmd, '')) NOT LIKE '%encoding_technique%'",
+     "WHERE NOT (COALESCE(a.user_identity.email, '') = '{{runner_principal}}'\n"
+     "                   AND lower(COALESCE(a.cmd, '')) LIKE '%encoding_technique%')"),
+]
+
+
 def rule_sql(func, args: list[str], spec: dict, window: str) -> str:
     body = func.body
     for pname, value in zip(func.params, args):  # same rule as inline_functions._substitute_params
@@ -256,6 +306,16 @@ def build(root: Path = ROOT) -> dict[str, str]:
         every, lookback = SCHEDULE[spec["kind"]]
         window = {"1h": "1 HOUR", "24h": "24 HOURS"}[every]
         sql, time_col = rule_sql(func, args, spec, window)
+        for old, new in RUNNER_MARKERS:  # a text marker excludes only the rule runner's own SQL
+            sql = sql.replace(old, new)
+        cols_out = set(func.columns) | ({"event_ts"} if time_col == "event_ts" else set())
+        actor_col = next((c for c in ACTOR_COLS if c in cols_out), None)
+        ip_col = next((c for c in IP_COLS if c in cols_out), None)
+        sql = with_allowlist(sql, PREFIX + key, actor_col is not None, ip_col is not None)
+        if actor_col and actor_col != "actor":
+            sql = sql.replace("al.principal = f.actor", f"al.principal = f.{actor_col}")
+        if ip_col and ip_col != "src_ip":
+            sql = sql.replace("al.src_ip = f.src_ip", f"al.src_ip = f.{ip_col}")
         det = read_dscc(root / "base" / "detections" / f"{spec['nb']}.py").get("detection", {})
         cols = [c for c in func.columns if c not in SKIP_CONTEXT]
         context = {c: f"{{{c}}}" for c in cols}

@@ -11,9 +11,10 @@ objective: >-
   (secrets, storage credentials and external locations, connections, Unity Catalog metadata, Delta Sharing, query
   history and run output, repos and git credentials, workspace export); a person or pipeline uses a narrow,
   repeating set. Per principal and source IP in the run window the rule reports either at least 3 discovery families
-  from a public IP the principal did not sign in from in the 30 days before, or -- for service principals and
-  non-browser clients -- at least 3 discovery actions the principal never performed in the 30 days before.
-  Principals younger than 7 days are skipped (everything is new to them). Most read-only listing (users, clusters,
+  from a public IP the principal did not sign in from in the 32 days before, or -- for service principals and
+  non-browser clients -- at least 3 discovery actions the principal never performed in the 32 days before.
+  Principals with no history older than 7 days are skipped (everything is new to them); a sign-in older than 7 days
+  counts as history. Most read-only listing (users, clusters,
   jobs) leaves no audit row, so the breadth here understates what an actor did. False positives: a new admin or
   platform engineer, a newly granted service principal on its first real run, security tooling.
 mitre:
@@ -82,22 +83,33 @@ batch:
         LEFT JOIN base_act AS ba ON ba.actor = w.actor AND ba.service_name = w.service_name AND ba.action_name = w.action_name
         LEFT JOIN (SELECT DISTINCT actor, src_ip FROM sign_in_ips) AS si ON si.actor = w.actor AND si.src_ip = w.src_ip
         GROUP BY w.actor, w.src_ip
+      ),
+      findings AS (
+        SELECT event_time,
+               actor,
+               CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               src_ip,
+               families,
+               families_list,
+               new_action_types,
+               new_ip,
+               actions,
+               first_time
+        FROM scored
+        WHERE (families >= 3 AND new_ip)
+           OR (new_action_types >= 3 AND (actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR non_browser))
       )
-      SELECT event_time,
-             actor,
-             CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
-             src_ip,
-             families,
-             families_list,
-             new_action_types,
-             new_ip,
-             actions,
-             first_time
-      FROM scored
-      WHERE (families >= 3 AND new_ip)
-         OR (new_action_types >= 3 AND (actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR non_browser))
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_discovery_breadth_or_novel_actions')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
 output:
-  summary: '{actor} surveyed {families} discovery families ({families_list}) from {src_ip}; {new_action_types} new action types'
+  summary: '{actor} surveyed discovery surfaces from {src_ip}'
   event_time_column: event_time
   context:
     actor: '{actor}'

@@ -8,9 +8,9 @@ category: Behavioral
 fidelity: FIDELITY_MEDIUM
 objective: >-
   Stolen credentials are monetised by cryptomining and by reselling model access. Daily, the rule reports a principal
-  with no GPU compute in the 30 days before that creates a GPU cluster (gpu runtimes, Standard_N*, g4-6, p3-5,
+  with no GPU compute in the 32 days before that creates a GPU cluster (gpu runtimes, Standard_N*, g4-6, p3-5,
   a2/g2 node types) or a GPU serving endpoint; and, from system.serving.endpoint_usage, a requester with at least 1000
-  requests in the day and 10 times its daily median of the 30 days before, or a requester with no history that calls
+  requests in the day and 10 times its daily median of the 32 days before, or a requester with no history that calls
   at least 5 distinct served entities. False positives: an ML team starting GPU work; a new GenAI app or batch job.
 mitre:
 - {taxonomy: Enterprise, tactic: Impact, technique_id: T1496, technique: Resource Hijacking}
@@ -60,13 +60,24 @@ batch:
         WHERE IN_TIMERANGE(u.last_time)
           AND (u.reqs >= greatest(1000, 10 * coalesce(m.med_reqs, 0))
                OR (m.actor IS NULL AND u.endpoints >= 5))
+      ),
+      findings AS (
+        SELECT event_time, actor,
+               CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               src_ip, kind, events, endpoints
+        FROM (SELECT * FROM first_gpu UNION ALL SELECT * FROM serving)
       )
-      SELECT event_time, actor,
-             CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
-             src_ip, kind, events, endpoints
-      FROM (SELECT * FROM first_gpu UNION ALL SELECT * FROM serving)
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_compute_serving_resource_abuse')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
 output:
-  summary: '{kind}: {actor} ({events} events, {endpoints} endpoints)'
+  summary: '{kind}: {actor}'
   event_time_column: event_time
   context:
     actor: '{actor}'

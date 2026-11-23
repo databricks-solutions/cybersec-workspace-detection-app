@@ -55,6 +55,8 @@ expect:
     short_lived: 1
   - actor: sam@corp.example
     literal_keys: 1
+  # A browser user agent no longer excludes a create: the caller sets it, so it would hide an API client.
+  - actor: uma@corp.example
+    no_isolation: 1
   misses:
   - actor: tia@corp.example
-  - actor: uma@corp.example

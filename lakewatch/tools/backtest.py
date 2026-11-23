@@ -24,6 +24,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from try_fixtures import RULES, dur, rewrite  # noqa: E402
 
+EMPTY_ALLOWLIST = ("(SELECT CAST(NULL AS STRING) AS rule, CAST(NULL AS STRING) AS principal, "
+                   "CAST(NULL AS STRING) AS src_ip, CAST(NULL AS TIMESTAMP) AS expires_at WHERE 1 = 0)")
+
 
 def quote_table(name: str) -> str:
     return ".".join(f"`{p.strip('`')}`" for p in name.split("."))
@@ -36,6 +39,8 @@ def main() -> int:
     ap.add_argument("--only", default="")
     ap.add_argument("--windows", type=int, default=7)
     ap.add_argument("--audit-table", default="system.access.audit")
+    ap.add_argument("--allowlist-table", default="", help="allow-list table to apply (default: none)")
+    ap.add_argument("--runner-principal", default="", help="identity the rules run as (see deploy.py)")
     ap.add_argument("--show", type=int, default=0, help="print up to this many rows of each run that has rows")
     a = ap.parse_args()
     from databricks.sdk import WorkspaceClient
@@ -51,7 +56,9 @@ def main() -> int:
         rule = yaml.safe_load(path.read_text())
         step = dur(rule["schedule"]["at_least_every"])
         window = step + dur(rule["timerange"]["extend_lookback"])
-        query = rule["batch"]["sql"]["query"].replace("{{audit_table}}", quote_table(a.audit_table))
+        query = (rule["batch"]["sql"]["query"].replace("{{audit_table}}", quote_table(a.audit_table))
+                 .replace("{{allowlist_table}}", quote_table(a.allowlist_table) if a.allowlist_table else EMPTY_ALLOWLIST)
+                 .replace("{{runner_principal}}", a.runner_principal.replace("'", "''")))
         counts, err = [], None
         for k in range(a.windows):
             sql = f"SELECT count(*) FROM (\n{rewrite(query, now - step * k, window)}\n) AS r"
