@@ -179,6 +179,17 @@ def test_no_text_marker_switches_a_rule_off(path):
             assert "{{runner_principal}}" in window, f"marker {marker!r} must be tied to the runner principal"
 
 
+def test_bulk_export_skips_only_the_runners_own_rule_notebooks():
+    # Lakewatch exports each generated rule notebook from the run-as identity's home on every run. Skip those
+    # exports only: the actor must be the runner AND the path its rules folder, so other exports by it still count.
+    query = load(ROOT / "lakewatch" / "rules" / "cwda_bulk_notebook_export.yaml")["batch"]["sql"]["query"]
+    m = re.search(r"AND NOT \(COALESCE\(a\.user_identity\.email, ''\) = '\{\{runner_principal\}\}'\s+"
+                  r"AND startswith\(COALESCE\(a\.request_params\['notebookFullPath'\], ''\),\s+"
+                  r"'/Workspace/Users/\{\{runner_principal\}\}/notebooks/rules/lakewatch-rule-'\)\)", query)
+    assert m, "runner exclusion must pair the runner identity with its rules folder"
+    assert query.count("notebooks/rules/lakewatch-rule-") == 1
+
+
 # The user agent is set by the caller. In these rules it may add evidence for a finding but never drops one.
 UA_AS_EVIDENCE = {"cwdf_identity_provisioning_anomaly", "cwdf_discovery_breadth_or_novel_actions",
                   "cwdf_suspicious_client_user_agent"}

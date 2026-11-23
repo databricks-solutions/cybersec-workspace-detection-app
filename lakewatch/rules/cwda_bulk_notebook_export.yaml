@@ -75,6 +75,9 @@ batch:
             FROM {{audit_table}} AS a
             WHERE a.action_name = 'workspaceExport'
               AND IN_TIMERANGE(a.event_time)
+              AND NOT (COALESCE(a.user_identity.email, '') = '{{runner_principal}}'
+                   AND startswith(COALESCE(a.request_params['notebookFullPath'], ''),
+                                  '/Workspace/Users/{{runner_principal}}/notebooks/rules/lakewatch-rule-'))
           ),
           seen_nets AS (
             SELECT DISTINCT b.user_identity.email AS actor,

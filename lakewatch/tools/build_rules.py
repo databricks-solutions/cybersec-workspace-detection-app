@@ -264,6 +264,20 @@ RUNNER_MARKERS = [
      "                   AND lower(COALESCE(a.cmd, '')) LIKE '%encoding_technique%')"),
 ]
 
+# Lakewatch runs each rule by exporting the notebook it generated under the run-as identity's home
+# (notebooks/rules/lakewatch-rule-*), from rotating private IPs. A new runner has no network history, so every
+# hourly run looks like "own home, new network". Drop only those exports: actor is the runner AND the path is the
+# rules folder. A row in the allow-list table can't do this (it matches principal/IP, not path) and would hide
+# every export by the runner, including theft with its credentials.
+RUNNER_OWN = {
+    "bulk_notebook_export": [
+        (r"(WHERE a\.action_name = 'workspaceExport'\n(\s*)AND IN_TIMERANGE\(a\.event_time\))",
+         r"\1\n\2AND NOT (COALESCE(a.user_identity.email, '') = '{{runner_principal}}'"
+         r"\n\2     AND startswith(COALESCE(a.request_params['notebookFullPath'], ''),"
+         r"\n\2                    '/Workspace/Users/{{runner_principal}}/notebooks/rules/lakewatch-rule-'))"),
+    ],
+}
+
 
 def rule_sql(func, args: list[str], spec: dict, window: str) -> str:
     body = func.body
@@ -308,6 +322,10 @@ def build(root: Path = ROOT) -> dict[str, str]:
         sql, time_col = rule_sql(func, args, spec, window)
         for old, new in RUNNER_MARKERS:  # a text marker excludes only the rule runner's own SQL
             sql = sql.replace(old, new)
+        for pattern, repl in RUNNER_OWN.get(key, []):
+            sql, n = re.subn(pattern, repl, sql)
+            if n != 1:
+                raise ValueError(f"{key}: runner exclusion anchor matched {n} times: {pattern!r}")
         cols_out = set(func.columns) | ({"event_ts"} if time_col == "event_ts" else set())
         actor_col = next((c for c in ACTOR_COLS if c in cols_out), None)
         ip_col = next((c for c in IP_COLS if c in cols_out), None)
