@@ -1,0 +1,68 @@
+# Ported from the Lakewatch content pack rule databricks_audit/attempted_login_from_denied_ip (v1) to the flat v2 rule format of this demo.
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: adp_attempted_login_from_denied_ip
+description: Detect when a denied IP attempts to access Databricks
+severity: Informational
+category: Static Signature
+fidelity: FIDELITY_INVESTIGATIVE
+objective: Detect when a denied IP attempts to access Databricks
+mitre:
+- taxonomy: Enterprise
+  tactic: Initial Access
+  technique_id: T1078
+  technique: Valid Accounts
+  sub_technique_id: T1078.004
+  sub_technique: Cloud Accounts
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7 days
+schedule:
+  at_least_every: 1h
+  enabled: false
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      FROM {{audit_table}}
+      |> WHERE
+        IN_TIMERANGE(event_time)
+        AND service_name = 'accounts'
+        AND action_name = 'IpAccessDenied'
+        AND NOT (
+          source_ip_address RLIKE '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|169\.254\.)'
+          OR user_identity.email = 'System-User'
+        )
+      |> SELECT *
+      |> AGGREGATE
+          COUNT(*) as eventCount,
+          collect_set(user_identity.email) as emailSet,
+          collect_set(user_agent) as userAgentSet
+        GROUP BY source_ip_address
+      |> SELECT
+        source_ip_address,
+        emailSet,
+        userAgentSet,
+        eventCount
+      |> EXTEND element_at(array_sort(emailSet), 1) AS actor,
+           CASE WHEN element_at(array_sort(emailSet), 1) RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+           source_ip_address AS src_ip,
+           TIMERANGE_NOW() AS event_time
+output:
+  summary: 'Attempted login from denied ip: {src_ip}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '1'
+    source_ip_address: '{source_ip_address}'
+    emailSet: '{emailSet}'
+    userAgentSet: '{userAgentSet}'
+    eventCount: '{eventCount}'
+    detail: Denied IP {source_ip_address} attempted to access Databricks APIs {eventCount} times
+  default_context: false
+timerange:
+  extend_lookback: 15m
+annotations:
+  content_pack: databricks_audit
+  pack_rule: attempted_login_from_denied_ip

@@ -57,6 +57,8 @@
 # MAGIC     - IQRS_FROM_MEDIAN
 # MAGIC     - FORMATS_USED
 # MAGIC     - ANALYSIS
+# MAGIC     - SELF_HOME_NEW_NETWORK
+# MAGIC     - SOURCE_IPS
 # MAGIC     - event_time
 # MAGIC     - action_name
 # MAGIC     - user_identity.email
@@ -93,13 +95,19 @@
 # MAGIC
 # MAGIC ### Noise handling
 # MAGIC
-# MAGIC - **Per-user baseline** — automated backup accounts set their own (high) bar.
-# MAGIC - **Trailing days excluded from the baseline** — a live, ongoing bulk export cannot
-# MAGIC   inflate its own fence.
-# MAGIC - **Self-exports excluded** — a principal reading files under its own home directory
-# MAGIC   (`/Workspace/Users/<self>/...`) is platform/tooling behavior (e.g. Databricks Apps
-# MAGIC   pulling a deployment bundle), not cross-user exfiltration.
-# MAGIC - **No-baseline fallback** — a first-seen principal (no history before the trailing
+# MAGIC - **Per-user baseline** — automated backup accounts set their own (high) bar. The
+# MAGIC   baseline is read from its own trailing window, `baseline_days` long, ending
+# MAGIC   `baseline_exclude_days` before `earliest`, so the detection works at any scan window
+# MAGIC   (including a 24 h scheduled run) and in historical replays.
+# MAGIC - **Gap before the scan window** — `baseline_exclude_days` keeps a live, ongoing bulk
+# MAGIC   export that started just before `earliest` from inflating its own fence.
+# MAGIC - **Self-exports from known networks excluded** — a principal reading files under its
+# MAGIC   own home directory (`/Workspace/Users/<self>/...`) is usually platform/tooling behavior
+# MAGIC   (e.g. Databricks Apps pulling a deployment bundle). Self-exports still COUNT when they
+# MAGIC   come from a network (/24) the principal did not use in the baseline window and the IP
+# MAGIC   is not Databricks platform egress, which is how a stolen token emptying its owner's
+# MAGIC   home looks.
+# MAGIC - **No-baseline fallback** — a first-seen principal (no export history in the baseline
 # MAGIC   window) is scored against a fixed `no_baseline_threshold` so it is never invisible.
 
 # COMMAND ----------
@@ -111,58 +119,112 @@ def bulk_notebook_export(
     baseline_exclude_days: int = 2,
     iqr_multiplier: float = 5.0,
     iqr_floor: int = 100,
-    no_baseline_threshold: int = 600,
+    no_baseline_threshold: int = 50,
+    baseline_days: int = 30,
 ):
     """
     Detect bulk notebook exports that are anomalous relative to each principal's own history.
 
     Args:
-        earliest (str): Earliest event_time to consider (defaults to 2 months ago).
-        latest (str): Latest event_time to consider (defaults to now).
-        baseline_exclude_days (int): Trailing days excluded from the baseline so a live
-            bulk export cannot inflate its own fence.
+        earliest (str): Start of the scan window (defaults to 2 months ago).
+        latest (str): End of the scan window (defaults to now).
+        baseline_exclude_days (int): Gap between the end of the baseline window and
+            `earliest`, so a live bulk export cannot inflate its own fence.
         iqr_multiplier (float): Multiplier applied to the (floored) IQR when building the fence.
         iqr_floor (int): Minimum value used for the IQR term, guaranteeing a minimum
             absolute increase over the user's normal level.
         no_baseline_threshold (int): Flat threshold applied to principals with no baseline.
+        baseline_days (int): Length of the baseline window that ends
+            `baseline_exclude_days` before `earliest`.
 
     Returns:
         pyspark.sql.DataFrame: One row per anomalous (user, day) bulk export.
     """
+    from pyspark.sql import Column
     from pyspark.sql.functions import (
         col, current_timestamp, expr, to_date, to_timestamp, countDistinct,
         collect_set, expr as F_expr, coalesce, lit, round as spark_round,
-        concat, array_join, contains, date_sub, current_date, greatest,
-        percentile_approx, when
+        concat, array_join, contains, greatest, percentile_approx, when,
+        regexp_extract, regexp_replace, nullif, slice as spark_slice, array_sort
     )
 
     earliest = earliest or current_timestamp() - expr("INTERVAL 2 months")
     latest = latest or current_timestamp()
+    earliest_ts = earliest if isinstance(earliest, Column) else to_timestamp(lit(earliest))
+    baseline_end = earliest_ts - expr(f"INTERVAL {int(baseline_exclude_days)} DAYS")
+    baseline_start = baseline_end - expr(f"INTERVAL {int(baseline_days)} DAYS")
 
     df = spark.table("system.access.audit")
+    ip = regexp_replace(col("source_ip_address"), r":\d+$", "")
+    # /24 for IPv4, the full address otherwise.
+    net = coalesce(nullif(regexp_extract(ip, r"^(\d+\.\d+\.\d+)\.", 1), lit("")), ip)
+    self_home = contains(coalesce(col("request_params.notebookFullPath"), lit("")),
+                         coalesce(col("user_identity.email"), lit(" ")))
+    in_scan = col("event_time").between(earliest, latest)
+    in_baseline = (col("event_time") >= baseline_start) & (col("event_time") < baseline_end)
+    is_export = col("action_name") == "workspaceExport"
 
-    # Notebook export events in range, excluding self-home exports (platform/tooling noise).
-    exports = df.filter(
-        (col("action_name") == "workspaceExport") &
-        (col("event_time").between(earliest, latest)) &
-        (~contains(col("request_params.notebookFullPath"), col("user_identity.email")))
-    ).select(
+    # Platform egress: IPs Databricks itself authenticates from. An IP counts when it carries a
+    # cluster-internal PAT or in-house OAuth token, or the in-house OAuth client action (Apps,
+    # serverless) from a private address, or that action from a public address at service
+    # volume: one principal at least 200 times in a day. A user's laptop calling a Databricks App
+    # logs the same action from its own IP, far less often (at most 60 a day on the reference
+    # workspace), so it stays in scope. A user's token relayed by an App or used on a cluster
+    # shows up from platform egress; that is not a second location. Looks back 2 days before the
+    # window so a short window still sees a full day of service traffic.
+    from pyspark.sql import functions as _F
+    _ip = ip
+    _internal = _F.col("request_params.authenticationMethod").isin("API_INT_PAT_TOKEN", "API_INHOUSE_OAUTH_TOKEN")
+    _inhouse = _F.col("action_name").isin("workspaceInHouseOAuthClientAuthentication",
+                                           "accountInHouseOAuthClientAuthentication")
+    platform_ips = (df
+        .filter((_F.col("event_time") >= _F.lit(earliest).cast("timestamp") - _F.expr("INTERVAL 2 DAYS"))
+                & (_F.col("event_time") <= latest) & (_internal | _inhouse))
+        .groupBy(_ip.alias("_ip"), _F.col("user_identity.email"), _F.to_date("event_time"))
+        .agg(_F.sum(_internal.cast("int")).alias("_internal"), _F.sum(_inhouse.cast("int")).alias("_inhouse"))
+        .groupBy("_ip")
+        .agg(_F.sum("_internal").alias("_internal"), _F.sum("_inhouse").alias("_inhouse"),
+             _F.max("_inhouse").alias("_inhouse_day"))
+        .filter((_F.col("_internal") > 0)
+                | ((_F.col("_inhouse") > 0) & _F.col("_ip").rlike(r"^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])"))
+                | (_F.col("_inhouse_day") >= 200))
+        .select(_F.col("_ip").alias("platform_ip")))
+
+    scan = df.filter(is_export & in_scan).select(
         to_date(col("event_time")).alias("event_date"),
         col("user_identity.email").alias("user_email"),
         col("request_params.notebookFullPath").alias("notebook_path"),
         col("request_params.workspaceExportFormat").alias("export_format"),
+        ip.alias("ip"),
+        net.alias("net"),
+        self_home.alias("self_home"),
     )
+
+    # Networks each scanned principal used (any action) in the baseline window.
+    seen_nets = df.filter(in_baseline).select(
+        col("user_identity.email").alias("user_email"), net.alias("net")
+    ).join(scan.select("user_email").distinct(), "user_email", "left_semi").distinct() \
+     .withColumn("seen_net", lit(True))
+
+    scan = scan.join(seen_nets, ["user_email", "net"], "left") \
+               .join(platform_ips, col("ip") == col("platform_ip"), "left") \
+               .withColumn("self_home_new_network",
+                           col("self_home") & col("seen_net").isNull() & col("platform_ip").isNull())
+    exports = scan.filter(~col("self_home") | col("self_home_new_network"))
 
     # One row per user per day: distinct notebooks exported.
     per_user_day = exports.groupBy("event_date", "user_email").agg(
         countDistinct("notebook_path").alias("notebooks_exported"),
+        countDistinct(when(col("self_home_new_network"), col("notebook_path"))).alias("self_home_new_network"),
         collect_set("export_format").alias("formats_used"),
+        spark_slice(array_sort(collect_set("ip")), 1, 10).alias("source_ips"),
     )
 
-    # Per-user baseline (history minus the trailing days): median, IQR, and fence.
-    baseline = per_user_day.filter(
-        col("event_date") < date_sub(current_date(), baseline_exclude_days)
-    )
+    # Per-user baseline from its own trailing window (cross-user exports only).
+    baseline = df.filter(is_export & in_baseline & ~self_home).groupBy(
+        to_date(col("event_time")).alias("event_date"),
+        col("user_identity.email").alias("user_email"),
+    ).agg(countDistinct(col("request_params.notebookFullPath")).alias("notebooks_exported"))
     per_user_threshold = baseline.groupBy("user_email").agg(
         percentile_approx("notebooks_exported", 0.5).alias("median"),
         (percentile_approx("notebooks_exported", 0.75)
@@ -190,12 +252,17 @@ def bulk_notebook_export(
             (col("notebooks_exported") - col("median")) / F_expr("nullif(iqr, 0)"), 1
         ).alias("IQRS_FROM_MEDIAN"),
         col("formats_used").alias("FORMATS_USED"),
+        col("self_home_new_network").alias("SELF_HOME_NEW_NETWORK"),
+        col("source_ips").alias("SOURCE_IPS"),
         concat(
             col("notebooks_exported").cast("string"),
             lit(" notebooks exported (threshold "),
             spark_round(effective_threshold, 1).cast("string"),
             lit(", formats: "),
             array_join(col("formats_used"), "/"),
+            when(col("self_home_new_network") > 0,
+                 concat(lit(", "), col("self_home_new_network").cast("string"),
+                        lit(" from own home on a new network"))).otherwise(lit("")),
             lit(")"),
         ).alias("ANALYSIS"),
     ).orderBy(col("EVENT_DATE").desc(), col("NOTEBOOKS_EXPORTED").desc())

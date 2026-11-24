@@ -1,0 +1,67 @@
+# Databricks audit demo: schema, raw volume and the reset job. The Lakewatch rules have no bundle
+# resource yet (REST only), so the reset job and the auditdemo CLI manage them (`auditdemo teardown`
+# deletes them before `databricks bundle destroy`).
+bundle:
+  name: databricks-audit-demo
+  engine: direct
+
+python:
+  venv_path: .venv
+  resources:
+    - 'resources_py:load_resources'
+  mutators:
+    # The Genie space file uses audit_demo_catalog.audit_demo; this rewrites it to ${var.catalog}.${var.schema}.
+    - 'genie_agent_retarget:retarget_genie_spaces'
+
+include:
+  - resources/*.yml
+
+artifacts:
+  auditdemo_wheel:
+    type: whl
+    build: rm -rf dist && uv build --wheel --out-dir dist
+    dynamic_version: true   # serverless caches environments by wheel name
+    path: .
+    files:
+      - source: dist/*.whl
+
+sync:
+  exclude:
+    - .venv/**
+    - tests/**
+    - resources_py/**
+    - "**/__pycache__/**"
+
+variables:
+  catalog:
+    description: Catalog of the demo schema. It must be onboarded to Lakewatch.
+    default: some_catalog
+  schema:
+    description: Schema of the audit table, the raw volume, the principals table, views and rules.
+    default: databricks_audit_demo
+  audit_table:
+    description: >-
+      Table the rules read. Empty = the demo table <catalog>.<schema>.audit. For example
+      system.access.audit to run the rules on real data (the reset always loads the demo table, and its
+      matrix check only makes sense on the demo table).
+    default: ""
+  warehouse_id:
+    description: SQL warehouse that the Lakewatch API, the rules and the reset use.
+    lookup:
+      warehouse: Lakewatch Warehouse
+  genie:
+    description: >-
+      Create the Genie Agent (genie/databricks_audit.geniespace.json). Use true only after the first
+      reset (the space needs the audit, principals and demo_signals tables).
+    default: false
+  genie_table_mapping:
+    description: Rewrite rules for genie_agent_retarget (keys are the names in the space file).
+    type: complex
+    default:
+      audit_demo_catalog.audit_demo: ${var.catalog}.${var.schema}
+
+targets:
+  some-profile:
+    default: true
+    workspace:
+      profile: some-profile

@@ -1,0 +1,64 @@
+# Eval set of the Genie Agent (tools/genie_eval.py). A question passes when the answer (text and
+# result rows, case-insensitive) contains every item of `expect`. An item is a string, or a list of
+# strings where one of them is enough. Attacker IPs change with every reset, so only the range is
+# checked. Time words are rolling windows that end at the last reset (see the instructions).
+questions:
+  - question: Were we compromised in the last 90 days?
+    expect:
+      - [maria.lopez, Maria Lopez]
+      - sp-etl-prod
+  - question: Who created personal access tokens last week?
+    expect:
+      - sp-etl-prod
+  - question: Which secrets did maria.lopez read?
+    expect:
+      - sp-etl-prod-client-secret
+      - etl-prod
+  - question: What did sp-etl-prod do after it got an OAuth token?
+    expect:
+      - [createFunction, create function, created function, created three, created 3, util_parse_json]
+      - [svc-backup, admins, addPrincipalToGroup]
+  - question: Who was added to the admins group?
+    expect:
+      - svc-backup
+      - sp-etl-prod
+  - question: Which notebooks or files were exported yesterday?
+    expect:
+      - cluster-bootstrap.sh
+      - [budget_2027, revenue_model, q3_forecast]
+  - question: Show the timeline for maria.lopez and every identity that shared her IPs
+    expect:
+      - sp-etl-prod
+      - "203.0.113."
+  - question: What did the attacker do after reading secrets?
+    expect:
+      - sp-etl-prod
+      - [createFunction, create function, created function, util_parse_json, admins, svc-backup]
+  - question: Is the nightly secret listing by sp-ci-deploy suspicious?
+    expect:
+      - [routine, normal, expected, scheduled, benign, every night, each night, nightly job, not suspicious]
+  - question: Ana Silva added several users to a group. Is that a sign of an attack?
+    expect:
+      - data-eng
+      - [onboarding, routine, normal, expected, benign, not suspicious, legitimate]
+  - question: Which service principal was used from an IP address that a user also used?
+    expect:
+      - sp-etl-prod
+      - [maria.lopez, Maria Lopez]
+  - question: Which IP addresses were blocked by the IP access list after a successful login?
+    expect:
+      - sp-reporting
+      - "203.0.113."
+  - question: Was any browser session used from two different IP addresses?
+    expect:
+      - [tom.becker, Tom Becker]
+  - question: Which service principal failed to create compute and then tried other compute?
+    expect:
+      - sp-ml-batch
+  - question: Which functions were created and then deleted again within an hour?
+    expect:
+      - util_parse_json
+  - question: Who was denied access to a secret and then read the same secret from another scope?
+    expect:
+      - [maria.lopez, Maria Lopez]
+      - sp-etl-prod-client-secret

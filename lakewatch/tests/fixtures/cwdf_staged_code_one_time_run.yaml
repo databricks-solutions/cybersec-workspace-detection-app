@@ -1,0 +1,72 @@
+# Planted: import, one-time run, output read and delete from a new IP.
+# Near misses: the same steps by CI from its runner IP; a run and output read without staging.
+rows:
+- t: -14400
+  service_name: jobs
+  action_name: submitRun
+  email: ci@corp.example
+  ip: 198.51.100.60
+  user_agent: databricks-cli/0.230
+- t: -30
+  service_name: notebook
+  action_name: importNotebook
+  email: mallory@corp.example
+  ip: 203.0.113.130
+  user_agent: python-requests/2.32
+- t: -30
+  service_name: jobs
+  action_name: submitRun
+  email: mallory@corp.example
+  ip: 203.0.113.130
+  user_agent: python-requests/2.32
+- t: -30
+  service_name: jobs
+  action_name: getRunOutput
+  email: mallory@corp.example
+  ip: 203.0.113.130
+  user_agent: python-requests/2.32
+- t: -30
+  service_name: notebook
+  action_name: deleteNotebook
+  email: mallory@corp.example
+  ip: 203.0.113.130
+  user_agent: python-requests/2.32
+- t: -30
+  service_name: notebook
+  action_name: importNotebook
+  email: ci@corp.example
+  ip: 198.51.100.60
+  user_agent: databricks-cli/0.230
+- t: -30
+  service_name: jobs
+  action_name: submitRun
+  email: ci@corp.example
+  ip: 198.51.100.60
+  user_agent: databricks-cli/0.230
+- t: -30
+  service_name: jobs
+  action_name: getRunOutput
+  email: ci@corp.example
+  ip: 198.51.100.60
+  user_agent: databricks-cli/0.230
+- t: -30
+  service_name: jobs
+  action_name: submitRun
+  email: dev@corp.example
+  ip: 203.0.113.131
+  user_agent: databricks-cli/0.230
+- t: -29
+  service_name: jobs
+  action_name: getRunOutput
+  email: dev@corp.example
+  ip: 203.0.113.131
+  user_agent: databricks-cli/0.230
+expect:
+  hits:
+  - actor: mallory@corp.example
+    runs: 1
+    outputs: 1
+    deletes: 1
+  misses:
+  - actor: ci@corp.example
+  - actor: dev@corp.example

@@ -92,7 +92,8 @@
 # COMMAND ----------
 
 @detect(output=Output.asDataFrame)
-def metastore_admin_privilege_granted(earliest: str = None, latest: str = None, metastore_admin_groups: str = ""):
+def metastore_admin_privilege_granted(earliest: str = None, latest: str = None, metastore_admin_groups: str = "",
+        admin_group_pattern: str = r"(?i)admin"):
     from pyspark.sql.functions import (col, current_timestamp, expr, to_timestamp,
                                        lit, coalesce, when, struct, to_json)
     import uuid
@@ -157,14 +158,16 @@ def metastore_admin_privilege_granted(earliest: str = None, latest: str = None, 
 
         df_combined = df_direct.unionByName(df_group_additions, allowMissingColumns=True)
     else:
-        # No admin groups configured — capture all account-level group membership
-        # events for manual triage rather than silently dropping them.
-        df_all_group_additions = df.filter(
+        # No admin groups configured. Returning EVERY group add here labelled each one an
+        # admin grant (e.g. adding a user to a team group). Fall back to groups whose
+        # name matches admin_group_pattern instead; set metastore_admin_groups for exact coverage.
+        df_group_additions = df.filter(
             (col("event_time").between(earliest, latest)) &
             (col("service_name") == "accounts") &
-            (col("action_name").isin(group_membership_actions))
+            (col("action_name").isin(group_membership_actions)) &
+            coalesce(col("request_params.targetGroupName"), lit("")).rlike(admin_group_pattern)
         )
-        df_combined = df_direct.unionByName(df_all_group_additions, allowMissingColumns=True)
+        df_combined = df_direct.unionByName(df_group_additions, allowMissingColumns=True)
 
     df_detailed = df_combined.select(
         to_timestamp(col("event_time")).alias("EVENT_DATE"),
@@ -207,6 +210,10 @@ def metastore_admin_privilege_granted(earliest: str = None, latest: str = None, 
             .otherwise(lit("Group")).alias("principal_type"),
         coalesce(col("TARGET_PRINCIPAL_NAME"), lit("N/A")).alias("target_principal"),
         col("SRC_IP").alias("source_ip"),
+        col("TARGET_GROUP_NAME").alias("target_group"),
+        when(~col("ACTION").isin(group_membership_actions), lit("direct_admin_action"))
+            .when(lit(bool(metastore_admin_groups and metastore_admin_groups.strip())), lit("configured_admin_group"))
+            .otherwise(lit("admin_named_group")).alias("match_reason"),
         to_json(struct([col(c) for c in df_detailed.columns])).alias("event_data")
     ).orderBy(col("eventTime").desc())
 

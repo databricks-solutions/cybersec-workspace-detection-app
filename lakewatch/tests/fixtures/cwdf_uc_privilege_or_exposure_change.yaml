@@ -1,0 +1,41 @@
+# Planted: an EXTERNAL_USE self-grant; a Delta Sharing recipient; a Lakebase role with bypassrls.
+# Near miss: SELECT granted to a group.
+rows:
+- t: -20
+  service_name: unityCatalog
+  action_name: updatePermissions
+  email: mallory@corp.example
+  ip: 203.0.113.230
+  request_params:
+    securable_full_name: main.finance
+    changes: '[{"principal": "mallory@corp.example", "add": ["EXTERNAL_USE_SCHEMA"]}]'
+- t: -20
+  service_name: unityCatalog
+  action_name: createRecipient
+  email: mallory@corp.example
+  ip: 203.0.113.230
+  request_params:
+    name: ext-partner
+- t: -20
+  service_name: postgres
+  action_name: createRole
+  email: edededed-1111-2222-3333-444444444444
+  ip: 10.0.0.40
+  request_params:
+    name: r1
+    attributes: '{"bypassrls": true}'
+- t: -20
+  service_name: unityCatalog
+  action_name: updatePermissions
+  email: dba@corp.example
+  ip: 198.51.100.170
+  request_params:
+    securable_full_name: main.sales
+    changes: '[{"principal": "analysts", "add": ["SELECT"]}]'
+expect:
+  hits:
+  - change_kind: external_use_grant
+  - change_kind: delta_sharing_object
+  - change_kind: lakebase_privileged_role
+  misses:
+  - actor: dba@corp.example

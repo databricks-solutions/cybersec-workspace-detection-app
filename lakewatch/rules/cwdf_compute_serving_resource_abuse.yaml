@@ -1,0 +1,96 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_compute_serving_resource_abuse
+description: Compute or model-serving resource abuse -- a principal's first GPU cluster or GPU serving endpoint, or a
+  model-serving requester far above its own daily median or fanning out over many endpoints.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  Stolen credentials are monetised by cryptomining and by reselling model access. Daily, the rule reports a principal
+  with no GPU compute in the 32 days before that creates a GPU cluster (gpu runtimes, Standard_N*, g4-6, p3-5,
+  a2/g2 node types) or a GPU serving endpoint; and, from system.serving.endpoint_usage, a requester with at least 1000
+  requests in the day and 10 times its daily median of the 32 days before, or a requester with no history that calls
+  at least 5 distinct served entities. False positives: an ML team starting GPU work; a new GenAI app or batch job.
+mitre:
+- {taxonomy: Enterprise, tactic: Impact, technique_id: T1496, technique: Resource Hijacking}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24 hours
+schedule: {at_least_every: 24h, enabled: false}
+timerange: {extend_lookback: 1h}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH gpu AS (
+        SELECT a.user_identity.email AS actor, a.event_time, a.source_ip_address AS src_ip, a.action_name
+        FROM {{audit_table}} AS a
+        WHERE a.event_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND a.event_time < TIMERANGE_NOW()
+          AND a.response.status_code = 200
+          AND ((a.service_name = 'clusters' AND a.action_name = 'create'
+                AND (coalesce(a.request_params['spark_version'], '') LIKE '%gpu%'
+                     OR coalesce(a.request_params['node_type_id'], '') RLIKE '^(Standard_N[CDV]|g[4-6]|p[3-5]|a2-|g2-)'))
+               OR (a.service_name = 'serverlessRealTimeInference' AND a.action_name = 'createServingEndpoint'
+                   AND coalesce(a.request_params['config'], '') RLIKE 'workload_type[^A-Z]*(GPU|MULTIGPU)'))
+      ),
+      first_gpu AS (
+        SELECT g.actor, max(g.event_time) AS event_time, max(g.src_ip) AS src_ip, 'first_gpu_compute' AS kind,
+               count(*) AS events, CAST(NULL AS BIGINT) AS endpoints
+        FROM gpu AS g
+        LEFT ANTI JOIN (SELECT DISTINCT actor FROM gpu WHERE event_time < TIMERANGE_NOW() - INTERVAL 26 HOURS) AS p
+          ON p.actor = g.actor
+        WHERE IN_TIMERANGE(g.event_time)
+        GROUP BY g.actor
+      ),
+      use AS (
+        SELECT requester AS actor, to_date(request_time) AS day, count(*) AS reqs,
+               count(DISTINCT served_entity_id) AS endpoints, max(request_time) AS last_time
+        FROM system.serving.endpoint_usage
+        WHERE request_time >= TIMERANGE_NOW() - INTERVAL 32 DAYS AND request_time < TIMERANGE_NOW()
+        GROUP BY requester, to_date(request_time)
+      ),
+      med AS (
+        SELECT actor, percentile(reqs, 0.5) AS med_reqs FROM use
+        WHERE day < to_date(TIMERANGE_NOW() - INTERVAL 26 HOURS) GROUP BY actor
+      ),
+      serving AS (
+        SELECT u.actor, u.last_time AS event_time, CAST(NULL AS STRING) AS src_ip, 'serving_spike_or_fanout' AS kind,
+               u.reqs AS events, u.endpoints AS endpoints
+        FROM use AS u LEFT JOIN med AS m ON m.actor = u.actor
+        WHERE IN_TIMERANGE(u.last_time)
+          AND (u.reqs >= greatest(1000, 10 * coalesce(m.med_reqs, 0))
+               OR (m.actor IS NULL AND u.endpoints >= 5))
+      ),
+      findings AS (
+        SELECT event_time, actor,
+               CASE WHEN actor RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               src_ip, kind, events, endpoints
+        FROM (SELECT * FROM first_gpu UNION ALL SELECT * FROM serving)
+      )
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_compute_serving_resource_abuse')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
+output:
+  summary: '{kind}: {actor}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    kind: '{kind}'
+    events: '{events}'
+    endpoints: '{endpoints}'
+  default_context: false
+runbook: |
+  1. Is the principal on an ML or GenAI team starting this work? Ask the owner.
+  2. first_gpu_compute: inspect the cluster's commands and libraries for miners.
+  3. serving spikes: check system.billing.usage for the cost and revoke the credential if not explained.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: compute_serving_resource_abuse

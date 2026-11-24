@@ -1,0 +1,536 @@
+# Planted: exports from 4 other homes; a .env from another user's repo; 25 paths from a new source.
+# Near misses: an owner exporting 25 own notebooks from the usual IP; 2 other homes in a browser.
+rows:
+- t: -14400
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb0
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: mallory@corp.example
+  ip: 203.0.113.100
+  user_agent: python-requests/2.32
+  request_params:
+    notebookFullPath: /Users/u1@corp.example/etl0
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: mallory@corp.example
+  ip: 203.0.113.100
+  user_agent: python-requests/2.32
+  request_params:
+    notebookFullPath: /Users/u2@corp.example/etl1
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: mallory@corp.example
+  ip: 203.0.113.100
+  user_agent: python-requests/2.32
+  request_params:
+    notebookFullPath: /Users/u3@corp.example/etl2
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: mallory@corp.example
+  ip: 203.0.113.100
+  user_agent: python-requests/2.32
+  request_params:
+    notebookFullPath: /Users/u4@corp.example/etl3
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: trent@corp.example
+  ip: 203.0.113.101
+  user_agent: curl/8.4
+  request_params:
+    notebookFullPath: /Repos/ops@corp.example/infra/.env
+    workspaceExportFormat: AUTO
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb0
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb1
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb2
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb3
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb4
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb5
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb6
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb7
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb8
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb9
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb10
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb11
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb12
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb13
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb14
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb15
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb16
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb17
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb18
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb19
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb20
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb21
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb22
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb23
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: carol@corp.example
+  ip: 198.51.100.31
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/carol@corp.example/nb24
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb0
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb1
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb2
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb3
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb4
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb5
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb6
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb7
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb8
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb9
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb10
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb11
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb12
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb13
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb14
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb15
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb16
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb17
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb18
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb19
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb20
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb21
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb22
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb23
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: dave@corp.example
+  ip: 203.0.113.102
+  user_agent: databricks-cli/0.230
+  request_params:
+    notebookFullPath: /Users/dave@corp.example/nb24
+    workspaceExportFormat: SOURCE
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: erin@corp.example
+  ip: 198.51.100.33
+  user_agent: Mozilla/5.0
+  request_params:
+    notebookFullPath: /Users/v1@corp.example/x
+    workspaceExportFormat: HTML
+- t: -30
+  service_name: workspace
+  action_name: workspaceExport
+  email: erin@corp.example
+  ip: 198.51.100.33
+  user_agent: Mozilla/5.0
+  request_params:
+    notebookFullPath: /Users/v2@corp.example/x
+    workspaceExportFormat: HTML
+expect:
+  hits:
+  - actor: mallory@corp.example
+    other_homes: 4
+  - actor: trent@corp.example
+    credential_paths: 1
+  - actor: dave@corp.example
+    new_source: 'true'
+  misses:
+  - actor: carol@corp.example
+  - actor: erin@corp.example

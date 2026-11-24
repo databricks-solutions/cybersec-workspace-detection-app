@@ -1,0 +1,76 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_token_minted_new_source
+description: An identity creates a personal access token from a source IP that it never used to create a token before.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 5 (persistence). A new personal access token keeps the access after the stolen
+  credential is rotated. The rule takes each successful accounts.generateDbToken in the run
+  window and looks for an earlier generateDbToken by the same identity from the same source IP in
+  the 14 days before it. No earlier pair means a token minted from a new source. Rows with no
+  source IP are skipped, so they never count as new. One finding per identity and IP. False
+  positives: the first token of a new user or job, a token owner on a new network.
+references:
+  - https://attack.mitre.org/techniques/T1098/001/
+  - https://attack.mitre.org/techniques/T1550/001/
+mitre:
+  - {taxonomy: Enterprise, tactic: Persistence, technique_id: T1098, technique: Account Manipulation,
+     sub_technique_id: T1098.001, sub_technique: Additional Cloud Credentials}
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1550,
+     technique: Use Alternate Authentication Material, sub_technique_id: T1550.001,
+     sub_technique: Application Access Token}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7 days
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      WITH mints AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'accounts' AND action_name = 'generateDbToken'
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, workspace_id, user_agent,
+                  request_params.tokenHash AS token_hash,
+                  request_params.tokenExpirationTime AS token_expiration_ms,
+                  response.status_code AS status
+        |> WHERE actor IS NOT NULL AND actor <> '' AND src_ip IS NOT NULL AND src_ip <> ''
+      ),
+      candidates AS (
+        FROM mints |> WHERE IN_TIMERANGE(event_time) AND status = 200
+      )
+      FROM candidates AS c
+      |> LEFT ANTI JOIN mints AS b
+           ON b.actor = c.actor AND b.src_ip = c.src_ip AND b.event_time < c.event_time
+      |> AGGREGATE max(c.event_time) AS event_time, count(*) AS n_tokens,
+                   max_by(c.user_agent, c.event_time) AS user_agent,
+                   max_by(c.token_hash, c.event_time) AS token_hash,
+                   max_by(c.token_expiration_ms, c.event_time) AS token_expiration_ms,
+                   array_join(array_sort(collect_set(c.workspace_id)), ', ') AS workspaces
+         GROUP BY c.actor AS actor, c.actor_kind AS actor_kind, c.src_ip AS src_ip
+      |> SELECT event_time, actor, actor_kind, src_ip, token_hash, token_expiration_ms, n_tokens, user_agent,
+                workspaces
+output:
+  summary: 'Token created by {actor} from a new source IP {src_ip}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '5'
+    token_hash: '{token_hash}'
+    token_expiration_ms: '{token_expiration_ms}'
+    user_agent: '{user_agent}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Look up src_ip: is it a company range (VPN, office, CI egress)?
+  2. Find the token in the token list of the workspace (creation time event_time) and revoke it if the use is not expected.
+  3. Look for tokenLogin rows of the identity after event_time from new IPs.

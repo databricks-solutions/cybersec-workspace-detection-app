@@ -1,0 +1,84 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_compute_fallback
+description: A cluster create or job submitRun fails, then the same identity starts a SQL warehouse or a job run within 10 minutes.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 4 (execution). An attacker who wants compute tries the first path and, when it fails,
+  quickly tries another one. The rule takes each failed clusters.create (status 400 or higher,
+  this includes 500 REQUEST_LIMIT_EXCEEDED) or failed jobs.submitRun (any status other than 200)
+  in the 14 days before the run. It joins them to a successful databrickssql.startWarehouse,
+  jobs.runNow or jobs.submitRun by the same identity in the 10 minutes after the failure. The
+  fallback call must be in the run window. One finding per identity. False positives: a job
+  scheduler that retries on other compute, a user who hits a quota and starts a warehouse.
+references:
+  - https://attack.mitre.org/techniques/T1578/002/
+  - https://attack.mitre.org/techniques/T1496/
+mitre:
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1578,
+     technique: Modify Cloud Compute Infrastructure, sub_technique_id: T1578.002,
+     sub_technique: Create Cloud Instance}
+  - {taxonomy: Enterprise, tactic: Impact, technique_id: T1496, technique: Resource Hijacking}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7 days
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      WITH compute AS (
+        FROM {{audit_table}}
+        |> WHERE ((service_name = 'clusters' AND action_name = 'create')
+               OR (service_name = 'jobs' AND action_name IN ('submitRun', 'runNow'))
+               OR (service_name = 'databrickssql' AND action_name = 'startWarehouse'))
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, workspace_id,
+                  concat(service_name, '.', action_name) AS action, response.status_code AS status,
+                  response.error_message AS error_message
+        |> WHERE actor IS NOT NULL AND actor <> ''
+      ),
+      failures AS (
+        FROM compute
+        |> WHERE (action = 'clusters.create' AND status >= 400) OR (action = 'jobs.submitRun' AND status <> 200)
+      ),
+      fallbacks AS (
+        FROM compute
+        |> WHERE status = 200 AND action IN ('databrickssql.startWarehouse', 'jobs.runNow', 'jobs.submitRun')
+             AND IN_TIMERANGE(event_time)
+      )
+      FROM failures AS f
+      |> JOIN fallbacks AS n
+           ON n.actor = f.actor AND n.event_time > f.event_time AND n.event_time <= f.event_time + INTERVAL 10 MINUTES
+      |> AGGREGATE max(n.event_time) AS event_time, max_by(n.src_ip, n.event_time) AS src_ip,
+                   min(f.event_time) AS first_failure_at,
+                   array_join(array_sort(collect_set(concat(f.action, ' ', f.status))), ', ') AS failed_actions,
+                   array_join(array_sort(collect_set(n.action)), ', ') AS fallback_actions,
+                   max_by(f.error_message, f.event_time) AS last_error,
+                   array_join(array_sort(collect_set(n.workspace_id)), ', ') AS workspaces
+         GROUP BY f.actor AS actor, f.actor_kind AS actor_kind
+      |> SELECT event_time, actor, actor_kind, src_ip, first_failure_at, failed_actions, fallback_actions,
+                last_error, workspaces
+output:
+  summary: 'Compute fallback after failed launch by {actor}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '4'
+    failed_actions: '{failed_actions}'
+    fallback_actions: '{fallback_actions}'
+    last_error: '{last_error}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Look at what ran on the fallback compute (warehouse query history, the job run and its notebook).
+  2. Ask the owner of the identity if the job and the warehouse use are expected.
+  3. Check how the identity authenticated before the failure (new IP, new user agent, new token).

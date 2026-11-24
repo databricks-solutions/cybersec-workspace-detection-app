@@ -1,0 +1,46 @@
+# Planted: a foreign catalog created and deleted in 8 minutes; a query of the provider's ACCOUNT_USAGE.CREDENTIALS.
+# Near miss: a platform engineer with catalog history creating a foreign catalog.
+rows:
+- t: -40
+  service_name: unityCatalog
+  action_name: createCatalog
+  email: mallory@corp.example
+  ip: 203.0.113.251
+  request_params:
+    name: tmp_sf
+    connection_name: snowflake_prod
+- t: -32
+  service_name: unityCatalog
+  action_name: deleteCatalog
+  email: mallory@corp.example
+  ip: 203.0.113.251
+  request_params:
+    name_arg: tmp_sf
+- t: -30000
+  service_name: unityCatalog
+  action_name: createCatalog
+  email: platform@corp.example
+  ip: 198.51.100.195
+  request_params:
+    name: old
+- t: -30
+  service_name: unityCatalog
+  action_name: createCatalog
+  email: platform@corp.example
+  ip: 198.51.100.195
+  request_params:
+    name: pg_ro
+    connection_name: postgres_ro
+query_rows:
+- t: -20
+  executed_by: spy@corp.example
+  statement_id: f1
+  statement_text: SELECT * FROM sf_cat.ACCOUNT_USAGE.CREDENTIALS
+expect:
+  hits:
+  - actor: mallory@corp.example
+    kind: create_delete_churn
+  - actor: spy@corp.example
+    kind: provider_metadata_query
+  misses:
+  - actor: platform@corp.example

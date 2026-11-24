@@ -36,20 +36,23 @@ RETURNS TABLE (
   event_time          TIMESTAMP COMMENT 'When the token was created (UTC)',
   status              STRING    COMMENT 'Success or Failure',
   actor               STRING    COMMENT 'Identity that created the token',
-  token_lifetime_days DOUBLE    COMMENT 'Days until expiry. Long-lived tokens are the risk',
+  token_lifetime_days DOUBLE    COMMENT 'Days until expiry (2 decimals). NULL when the token never expires',
+  no_expiry           BOOLEAN   COMMENT 'TRUE when the token was created without an expiry -- review first',
   source_ip           STRING    COMMENT 'IP the request came from',
   user_agent          STRING    COMMENT 'Client used -- distinguishes automation from a person',
   audit_level         STRING    COMMENT 'ACCOUNT_LEVEL or WORKSPACE_LEVEL',
   request_params      MAP<STRING, STRING> COMMENT 'Raw payload, for evidence'
 )
-COMMENT 'Personal access tokens (PATs) created, with computed lifetime in days. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, generateDbToken, who minted API credentials, token lifetime.'
+COMMENT 'Personal access tokens (PATs) created, with computed lifetime in days (fractional, so tokens living hours are visible) and a no_expiry flag for tokens created without an expiry -- the most durable credential and the first to review. MITRE T1098 Account Manipulation. A long-lived token is a durable credential that survives password rotation and often SSO; tokens minted from an unexpected user_agent or IP are the signal. Use for: who created a personal access token, new PATs, token creation, long-lived tokens, tokens that never expire, generateDbToken, who minted API credentials, token lifetime.'
 RETURN
   SELECT
     a.event_time,
     CASE WHEN a.response.status_code = 200 THEN 'Success' ELSE 'Failure' END,
     a.user_identity.email,
-    ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))
-           - unix_timestamp(a.event_time)) / 3600 / 24, 0),
+    CASE WHEN CAST(a.request_params['tokenExpirationTime'] AS BIGINT) > 0
+         THEN ROUND((CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000
+                     - unix_timestamp(a.event_time)) / 86400, 2) END,
+    COALESCE(CAST(a.request_params['tokenExpirationTime'] AS BIGINT), 0) <= 0,
     a.source_ip_address,
     a.user_agent,
     a.audit_level,
@@ -57,9 +60,7 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.service_name = 'accounts'
     AND a.action_name = 'generateDbToken'
-    AND a.event_time BETWEEN start_time AND end_time
-    AND ROUND((unix_timestamp(from_unixtime(CAST(a.request_params['tokenExpirationTime'] AS BIGINT) / 1000))
-           - unix_timestamp(a.event_time)) / 3600 / 24, 0) > 0;
+    AND a.event_time BETWEEN start_time AND end_time;
 
 -- --------------------------------------------------------------------------
 -- Personal access token revoked. Port of behavioral/access_token_deleted.py.
@@ -274,8 +275,10 @@ RETURN
 
 -- --------------------------------------------------------------------------
 -- User account created. Port of behavioral/user_account_created.py.
--- The notebook requires endpoint='adminConsole' AND a 200, i.e. a successful
--- console-driven add rather than any SCIM 'add'.
+-- endpoint adminConsole (UI), scim (API, Terraform, IdP provisioning) or
+-- autoUserCreation (JIT on first SSO login, logged with a NULL status, so a NULL
+-- status is accepted). DatabricksApps -- the SPs Apps create for themselves -- is
+-- left out as platform behaviour.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_user_account_created(
   start_time TIMESTAMP COMMENT 'Start of the search window (inclusive)',
@@ -285,17 +288,20 @@ RETURNS TABLE (
   event_time  TIMESTAMP COMMENT 'When the account was created (UTC)',
   actor       STRING    COMMENT 'Identity that created it',
   target_user STRING    COMMENT 'Account that was created',
-  endpoint    STRING    COMMENT 'Origin of the request (adminConsole)',
+  target_kind STRING    COMMENT 'user or service_principal (UUID name)',
+  endpoint    STRING    COMMENT 'Origin of the request: adminConsole, scim or autoUserCreation',
   source_ip   STRING    COMMENT 'IP the request came from',
   user_agent  STRING    COMMENT 'Client used',
   audit_level STRING    COMMENT 'ACCOUNT_LEVEL or WORKSPACE_LEVEL'
 )
-COMMENT 'User accounts created through the admin console. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user.'
+COMMENT 'User accounts and service principals created in the account, through the admin console, the SCIM API (scripts, Terraform, IdP provisioning, or an attacker holding an admin token) or just-in-time SSO provisioning (autoUserCreation). target_kind says whether a user or a service principal was created. MITRE T1136 Create Account. Attacker-created accounts are a persistence mechanism that survives password resets on the compromised original. Service principals that Databricks Apps create for themselves (endpoint DatabricksApps) are not included. Use for: new user accounts, who was added to the account, account creation, new users created, who created a user, new service principal created, SCIM user creation, auto-provisioned users.'
 RETURN
   SELECT
     a.event_time,
     a.user_identity.email,
     a.request_params['targetUserName'],
+    CASE WHEN a.request_params['targetUserName'] RLIKE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+         THEN 'service_principal' ELSE 'user' END,
     a.request_params['endpoint'],
     a.source_ip_address,
     a.user_agent,
@@ -303,8 +309,8 @@ RETURN
   FROM system.access.audit AS a
   WHERE a.service_name = 'accounts'
     AND a.action_name = 'add'
-    AND CAST(a.response.status_code AS INT) = 200
-    AND a.request_params['endpoint'] = 'adminConsole'
+    AND (CAST(a.response.status_code AS INT) = 200 OR a.response.status_code IS NULL)
+    AND a.request_params['endpoint'] IN ('adminConsole', 'scim', 'autoUserCreation')
     AND a.event_time BETWEEN start_time AND end_time;
 
 -- --------------------------------------------------------------------------

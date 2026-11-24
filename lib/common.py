@@ -546,9 +546,9 @@ def run_all_detections(
     try:
         w = WorkspaceClient()
 
-        # Scan both binary and behavioral subdirectories
+        # Scan both event-based and behavioral subdirectories
         notebook_paths = []
-        for subdir in ["binary", "behavioral"]:
+        for subdir in ["event-based", "behavioral"]:
             subdir_path = f"{workspace_dir}/{subdir}"
             try:
                 notebooks = list(w.workspace.list(subdir_path))

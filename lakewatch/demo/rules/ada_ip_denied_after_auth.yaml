@@ -1,0 +1,95 @@
+catalog_name: "{{catalog}}"
+schema_name: "{{schema}}"
+rule_name: ada_ip_denied_after_auth
+description: An IP access list blocks an identity right after a successful OAuth sign-in, or blocks it in two or more workspaces.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_INVESTIGATIVE
+objective: >-
+  Stage 2 (discovery, blocked). A stolen credential works for authentication, but the IP access
+  list of the workspace blocks the calls (accounts.IpAccessDenied). The rule takes each denial in the
+  run window and fires when (a) it is the first denial of the identity in 14 days and the identity
+  got an OAuth token (accounts.oidcTokenAuthorization, status 200) in the hour before, or (b) the
+  identity was denied in two or more workspaces within one hour (a credential that is tried
+  everywhere). The control worked, but the credential is in somebody else's hands. One finding per
+  identity. False positives: a job moved to a new egress IP that is not yet in the allow list.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+mitre:
+  - {taxonomy: Enterprise, tactic: Initial Access, technique_id: T1078, technique: Valid Accounts,
+     sub_technique_id: T1078.004, sub_technique: Cloud Accounts}
+  - {taxonomy: Enterprise, tactic: Defense Evasion, technique_id: T1550,
+     technique: Use Alternate Authentication Material, sub_technique_id: T1550.001,
+     sub_technique: Application Access Token}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 7 days
+schedule: {at_least_every: 1h, enabled: false}
+batch:
+  warehouse_id: "{{warehouse_id}}"
+  sql:
+    query: |
+      WITH denied AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'accounts' AND action_name = 'IpAccessDenied'
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time, user_identity.email AS actor,
+                  CASE WHEN user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                         OR identity_metadata.acting_resource_type ILIKE '%service principal%'
+                       THEN 'sp' ELSE 'user' END AS actor_kind,
+                  source_ip_address AS src_ip, workspace_id, request_params.path AS path
+        |> WHERE actor IS NOT NULL AND actor <> ''
+        |> EXTEND min(event_time) OVER (PARTITION BY actor) AS first_denied
+      ),
+      auth AS (
+        FROM {{audit_table}}
+        |> WHERE service_name = 'accounts' AND action_name = 'oidcTokenAuthorization' AND response.status_code = 200
+             AND event_time >= TIMERANGE_NOW() - INTERVAL 14 DAYS AND event_time <= TIMERANGE_NOW()
+        |> SELECT event_time AS auth_time, user_identity.email AS actor, request_params.tokenId AS token_id
+      ),
+      after_auth AS (
+        FROM denied AS d
+        |> WHERE IN_TIMERANGE(d.event_time) AND d.event_time = d.first_denied
+        |> JOIN auth AS a
+             ON a.actor = d.actor AND a.auth_time <= d.event_time AND a.auth_time >= d.event_time - INTERVAL 1 HOUR
+        |> SELECT d.event_time, d.actor, d.actor_kind, d.src_ip, d.workspace_id, a.token_id, 'after_auth' AS reason
+      ),
+      multi_ws AS (
+        FROM denied AS d
+        |> WHERE IN_TIMERANGE(d.event_time)
+        |> JOIN denied AS x
+             ON x.actor = d.actor AND x.event_time <= d.event_time AND x.event_time >= d.event_time - INTERVAL 1 HOUR
+        |> AGGREGATE count(DISTINCT x.workspace_id) AS n_ws
+           GROUP BY d.event_time AS event_time, d.actor AS actor, d.actor_kind AS actor_kind, d.src_ip AS src_ip,
+                    d.workspace_id AS workspace_id
+        |> WHERE n_ws >= 2
+        |> SELECT event_time, actor, actor_kind, src_ip, workspace_id, CAST(NULL AS STRING) AS token_id,
+                  'multi_workspace' AS reason
+      ),
+      hits AS (
+        SELECT * FROM after_auth UNION ALL SELECT * FROM multi_ws
+      )
+      FROM hits
+      |> AGGREGATE max(event_time) AS event_time, max_by(src_ip, event_time) AS src_ip,
+                   max(token_id) AS token_id,
+                   array_join(array_sort(collect_set(reason)), ', ') AS reasons,
+                   array_join(array_sort(collect_set(workspace_id)), ', ') AS workspaces
+         GROUP BY actor, actor_kind
+      |> SELECT event_time, actor, actor_kind, src_ip, token_id, reasons, workspaces
+output:
+  summary: 'IP access list blocked {actor} after sign-in'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    stage: '2'
+    token_id: '{token_id}'
+    reasons: '{reasons}'
+    workspaces: '{workspaces}'
+  default_context: false
+timerange:
+  extend_lookback: 15m
+runbook: |
+  1. Is src_ip a planned new egress of the job? If yes, update the IP access list and close.
+  2. If not, the credential is leaked: rotate the secret of the identity (token_id is the OAuth token)
+     and check other workspaces and accounts for calls from src_ip.

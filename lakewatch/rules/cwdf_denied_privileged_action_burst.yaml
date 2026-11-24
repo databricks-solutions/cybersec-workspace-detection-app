@@ -1,0 +1,84 @@
+catalog_name: '{{catalog}}'
+schema_name: '{{schema}}'
+rule_name: cwdf_denied_privileged_action_burst
+description: A burst of refused privileged or data actions by one principal -- many distinct refused action types, a
+  self-grant attempt, or failed creates across several workspaces.
+severity: Medium
+category: Behavioral
+fidelity: FIDELITY_MEDIUM
+objective: >-
+  Permission probing with a stolen credential. An actor testing what a credential can do fails across many action
+  types; a real user fails on one thing and stops. Per principal and source IP in the run window, over refused
+  (status not 200/204/206) Unity Catalog creates and grants, Delta Sharing creates, cluster, job, warehouse and DBFS
+  creates, and refused secrets and UC reads, the rule reports at least 4 distinct refused action types, any refused
+  updatePermissions that names the principal itself, or at least 3 refused creates in at least 3 workspaces.
+  False positives: a user exploring a new workspace without the right grants; a misconfigured automation.
+mitre:
+- {taxonomy: Enterprise, tactic: Discovery, technique_id: T1069, technique: Permission Groups Discovery,
+   sub_technique_id: T1069.003, sub_technique: Cloud Groups}
+- {taxonomy: Enterprise, tactic: Privilege Escalation, technique_id: T1098, technique: Account Manipulation}
+deduplication: DEDUPLICATION_ENABLED
+deduplication_time_window: 24 hours
+schedule: {at_least_every: 1h, enabled: false}
+timerange: {extend_lookback: 30m}
+batch:
+  warehouse_id: '{{warehouse_id}}'
+  sql:
+    query: |
+      WITH findings AS (
+        SELECT max(a.event_time) AS event_time, a.user_identity.email AS actor,
+               CASE WHEN a.user_identity.email RLIKE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN 'sp' ELSE 'user' END AS actor_kind,
+               a.source_ip_address AS src_ip,
+               count(*) AS refused,
+               count(DISTINCT a.service_name || '/' || a.action_name) AS refused_actions,
+               count(DISTINCT a.workspace_id) AS workspaces,
+               count_if(a.action_name = 'updatePermissions'
+                        AND coalesce(a.request_params['changes'], '') LIKE concat('%', a.user_identity.email, '%')) AS self_grant_attempts,
+               concat_ws(', ', slice(array_sort(collect_set(a.service_name || '/' || a.action_name)), 1, 15)) AS actions,
+               min(a.event_time) AS first_time
+        FROM {{audit_table}} AS a
+        WHERE IN_TIMERANGE(a.event_time)
+          AND a.response.status_code NOT IN (200, 204, 206)
+          AND a.user_identity.email IS NOT NULL AND a.user_identity.email <> 'System-User'
+          AND a.action_name IN ('createCatalog', 'createSchema', 'createExternalLocation', 'createStorageCredential',
+                                'createVolume', 'createConnection', 'updatePermissions', 'requestPermissions',
+                                'createShare', 'createRecipient', 'create', 'createWarehouse', 'put',
+                                'listSecrets', 'getSecret', 'listAcls', 'getTable', 'getSchema', 'listTables',
+                                'generateTemporaryTableCredential', 'generateTemporaryVolumeCredential')
+        GROUP BY a.user_identity.email, a.source_ip_address
+        HAVING count(DISTINCT a.service_name || '/' || a.action_name) >= 4
+            OR count_if(a.action_name = 'updatePermissions'
+                        AND coalesce(a.request_params['changes'], '') LIKE concat('%', a.user_identity.email, '%')) > 0
+            OR (count(DISTINCT a.workspace_id) >= 3
+                AND count_if(a.action_name IN ('create', 'createWarehouse', 'createCatalog', 'put')) >= 3)
+      )
+      -- Allow-list: drop findings that match a row in the allow-list table (tune there, not here)
+      SELECT f.* FROM findings AS f
+      WHERE NOT EXISTS (
+        SELECT 1 FROM {{allowlist_table}} AS al
+        WHERE al.rule IN ('*', 'cwdf_denied_privileged_action_burst')
+          AND (al.expires_at IS NULL OR al.expires_at > TIMERANGE_NOW())
+          AND (al.principal IS NOT NULL OR al.src_ip IS NOT NULL)
+          AND (al.principal IS NULL OR al.principal = f.actor)
+          AND (al.src_ip IS NULL OR al.src_ip = f.src_ip))
+output:
+  summary: '{actor} refused privileged actions from {src_ip}'
+  event_time_column: event_time
+  context:
+    actor: '{actor}'
+    actor_kind: '{actor_kind}'
+    src_ip: '{src_ip}'
+    refused: '{refused}'
+    refused_actions: '{refused_actions}'
+    workspaces: '{workspaces}'
+    self_grant_attempts: '{self_grant_attempts}'
+    actions: '{actions}'
+    first_time: '{first_time}'
+  default_context: false
+runbook: |
+  1. Ask the principal's owner what they were trying to do.
+  2. A self-grant attempt or failures across many workspaces is probing: check how the principal signed in.
+  3. Revoke the credential if the activity is not explained.
+annotations:
+  source: cybersec-workspace-detection-app
+  family: denied_privileged_action_burst
