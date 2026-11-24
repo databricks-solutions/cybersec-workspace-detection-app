@@ -162,32 +162,40 @@ RETURN
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_secrets_discovery(
   start_time        TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time          TIMESTAMP COMMENT 'End of the search window (inclusive)',
-  scopes_threshold  INT       COMMENT 'Minimum listScopes calls per actor per day. Try 5 to start; 1 shows all activity.',
-  secrets_threshold INT       COMMENT 'Minimum distinct secrets read per actor per day. Try 5 to start; 1 shows all activity.'
+  scopes_threshold  INT       COMMENT 'Minimum enumeration calls (listScopes, listSecrets, listAcls) per actor per day. Try 5 to start; 1 shows all activity.',
+  secrets_threshold INT       COMMENT 'Minimum distinct secrets successfully read per actor per day. Try 5 to start; 1 shows all activity.'
 )
 RETURNS TABLE (
   event_date        DATE   COMMENT 'Day of activity (UTC)',
   actor             STRING COMMENT 'Identity doing the enumeration',
-  scopes_enumerated BIGINT COMMENT 'listScopes calls that day',
-  secrets_used      BIGINT COMMENT 'Distinct scope:key pairs read that day',
+  scopes_enumerated BIGINT COMMENT 'Enumeration calls that day: listScopes + listSecrets + listAcls',
+  secrets_used      BIGINT COMMENT 'Distinct scope:key pairs successfully read (getSecret, status 200) that day',
+  secrets_refused   BIGINT COMMENT 'Secrets calls refused that day (non-200). Reported, not thresholded: applications probing optional secrets refuse often',
   service_name      STRING COMMENT 'Emitting service'
 )
-COMMENT 'Secret discovery behaviour: an identity that both enumerates secret scopes (listScopes) and reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access.'
+COMMENT 'Secret discovery behaviour: an identity that both enumerates secrets (listScopes, listSecrets or listAcls) and successfully reads distinct secrets (getSecret) above the given thresholds on the same day. MITRE T1552 Unsecured Credentials, TA0006 Credential Access. Reading one known secret is normal application behaviour -- enumerate-then-read is the discovery pattern, which is why both thresholds must be met. Refused secrets calls are returned as secrets_refused for context. Volume is high in most accounts, so raise the thresholds rather than widening the window. Use for: secret scanning, credential harvesting, who enumerated secret scopes, secrets discovery, listScopes activity, someone reading many secrets, credential access.'
 RETURN
   SELECT
     to_date(a.event_time) AS event_date,
     a.user_identity.email AS actor,
-    SUM(CASE WHEN a.action_name = 'listScopes' THEN 1 ELSE 0 END) AS scopes_enumerated,
-    SIZE(COLLECT_SET(CONCAT(COALESCE(a.request_params['scope'], ''), ':',
-                            COALESCE(a.request_params['key'], '')))) AS secrets_used,
+    SUM(CASE WHEN a.action_name IN ('listScopes', 'listSecrets', 'listAcls') THEN 1 ELSE 0 END) AS scopes_enumerated,
+    -- Successful reads only: listing calls carry no key (they used to add an empty ':' entry),
+    -- and refused reads are not secrets obtained.
+    SIZE(COLLECT_SET(CASE WHEN a.action_name = 'getSecret' AND a.response.status_code = 200
+                          THEN CONCAT(COALESCE(a.request_params['scope'], ''), ':',
+                                      COALESCE(a.request_params['key'], '')) END)) AS secrets_used,
+    SUM(CASE WHEN a.response.status_code <> 200 THEN 1 ELSE 0 END) AS secrets_refused,
     MAX(a.service_name) AS service_name
   FROM system.access.audit AS a
-  WHERE a.action_name IN ('listScopes', 'getSecret')
+  -- service_name = 'secrets': Unity Catalog also emits a listSecrets action, with other request_params.
+  WHERE a.service_name = 'secrets'
+    AND a.action_name IN ('listScopes', 'listSecrets', 'listAcls', 'getSecret')
     AND a.event_time BETWEEN start_time AND end_time
   GROUP BY to_date(a.event_time), a.user_identity.email
-  HAVING SUM(CASE WHEN a.action_name = 'listScopes' THEN 1 ELSE 0 END) >= scopes_threshold
-     AND SIZE(COLLECT_SET(CONCAT(COALESCE(a.request_params['scope'], ''), ':',
-                                 COALESCE(a.request_params['key'], '')))) >= secrets_threshold;
+  HAVING SUM(CASE WHEN a.action_name IN ('listScopes', 'listSecrets', 'listAcls') THEN 1 ELSE 0 END) >= scopes_threshold
+     AND SIZE(COLLECT_SET(CASE WHEN a.action_name = 'getSecret' AND a.response.status_code = 200
+                               THEN CONCAT(COALESCE(a.request_params['scope'], ''), ':',
+                                           COALESCE(a.request_params['key'], '')) END)) >= secrets_threshold;
 
 -- --------------------------------------------------------------------------
 -- TruffleHog / credential scanner detected.
