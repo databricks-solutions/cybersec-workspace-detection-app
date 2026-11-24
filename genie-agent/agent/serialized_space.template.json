@@ -868,7 +868,8 @@
           ",\n  2",
           ",\n  5.0",
           ",\n  100",
-          ",\n  600",
+          ",\n  50",
+          ",\n  30",
           "\n)"
         ],
         "parameters": [
@@ -892,7 +893,7 @@
           }
         ],
         "usage_guidance": [
-          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration, and it is deliberately NOT covered by the general download detection, which excludes SOURCE-format exports as normal development -- the exact format bulk code theft uses. Self-exports from a principal own home directory are excluded as platform tooling; first-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration."
+          "Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. The baseline comes from its own window of baseline_days ending baseline_exclude_days before start_time, so any search window works. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration. Self-exports from a principal own home directory are excluded as platform tooling UNLESS they come from a network the principal did not use in the baseline window and the IP is not Databricks platform egress (self_home_new_network counts those) -- a stolen token emptying its owner home. First-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, exported other users notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration, stolen token exporting a home folder."
         ]
       },
       {

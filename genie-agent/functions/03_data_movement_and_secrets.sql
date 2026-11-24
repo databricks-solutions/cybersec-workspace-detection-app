@@ -322,11 +322,10 @@ RETURN
 -- Bulk notebook export -- per-principal anomaly, not a global threshold.
 -- Port of behavioral/bulk_notebook_export.py (David Veuve, PR #11).
 --
--- WHY THIS EXISTS ALONGSIDE detect_data_movement_downloads: that function
--- EXCLUDES workspaceExport with format SOURCE, treating it as normal
--- development -- and SOURCE is exactly the format a bulk export of code uses.
--- So the broad download detection deliberately misses source-code exfiltration,
--- and this one covers it. Keep both.
+-- WHY THIS EXISTS ALONGSIDE detect_data_movement_downloads: that function is a
+-- volume table across every download action; this one scores notebook exports
+-- against each principal's OWN history, which is what separates a code-theft
+-- spike from a loud automated account. Keep both.
 --
 -- THE SCORING IS THE DETECTION. Each principal is measured against its OWN
 -- history via a Tukey-style fence, not one global number:
@@ -345,40 +344,50 @@ RETURN
 -- that window, while staying close enough above observed peaks to catch a real
 -- spike.
 --
--- Three noise controls from the source notebook, all preserved:
---   * baseline_exclude_days -- trailing days are excluded from the baseline, so a
---     live in-progress bulk export cannot inflate its own fence.
+-- The baseline is read from its OWN trailing window -- baseline_days long,
+-- ending baseline_exclude_days before start_time -- not from inside the scan
+-- window, so any window works (a one-day question has a baseline too) and the
+-- gap keeps a live export that began just before start_time from inflating its
+-- own fence.
+--
+-- Noise controls, same as the source notebook:
 --   * self-export exclusion -- a principal reading under its own home directory
---     (/Workspace/Users/<self>/...) is platform tooling (Databricks Apps pulling
---     a deployment bundle), not cross-user exfiltration.
+--     (/Workspace/Users/<self>/...) is usually platform tooling (Databricks Apps
+--     pulling a deployment bundle). Self-exports still COUNT when they come from
+--     a network (/24) the principal did not use in the baseline window and the
+--     IP is not Databricks platform egress (see platform_ips below): a stolen token emptying its owner's home.
 --   * no_baseline_threshold -- a first-seen principal has no history, so it is
 --     scored against a flat number rather than being invisible. That is the
 --     failure mode that would matter most in a real incident: a new account
---     exfiltrating on day one.
+--     exfiltrating on day one. Default 50 (was 600, which let modest theft by a
+--     never-exporting service principal through).
 --
 -- NOTEBOOKS_EXPORTED counts DISTINCT paths, so re-exporting one notebook 500
 -- times reads as 1. That is correct for IP exfiltration (breadth of code taken,
 -- not request volume) and is deliberate -- do not "fix" it to a raw count.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ${CATALOG}.${SCHEMA}.detect_bulk_notebook_export(
-  start_time            TIMESTAMP COMMENT 'Start of the search window (inclusive). Use 60+ days so each principal has a baseline.',
+  start_time            TIMESTAMP COMMENT 'Start of the search window (inclusive)',
   end_time              TIMESTAMP COMMENT 'End of the search window (inclusive)',
-  baseline_exclude_days INT       COMMENT 'Trailing days excluded from the baseline so a live export cannot inflate its own fence. Source notebook default: 2',
+  baseline_exclude_days INT       COMMENT 'Gap in days between the baseline window and start_time, so a live export cannot inflate its own fence. Source notebook default: 2',
   iqr_multiplier        DOUBLE    COMMENT 'Multiplier on the floored IQR when building the fence. Source notebook default: 5.0',
   iqr_floor             INT       COMMENT 'Minimum IQR term, guaranteeing a minimum absolute rise over normal. Source notebook default: 100',
-  no_baseline_threshold INT       COMMENT 'Flat threshold for a principal with no baseline. Source notebook default: 600'
+  no_baseline_threshold INT       COMMENT 'Flat threshold for a principal with no baseline. Source notebook default: 50',
+  baseline_days         INT       COMMENT 'Length in days of the baseline window that ends baseline_exclude_days before start_time. Source notebook default: 30'
 )
 RETURNS TABLE (
-  event_date         DATE   COMMENT 'Day of the bulk export (UTC)',
-  actor              STRING COMMENT 'Principal that exported',
-  notebooks_exported BIGINT COMMENT 'DISTINCT notebooks exported that day',
-  threshold_applied  DOUBLE COMMENT 'This principal own fence, or the flat fallback when it has no history',
-  iqrs_from_median   DOUBLE COMMENT 'How many IQRs above this principal normal day -- the anomaly magnitude',
-  baseline_median    DOUBLE COMMENT 'This principal usual daily count, for context',
-  formats_used       STRING COMMENT 'Export formats seen. SOURCE means raw code',
-  analysis           STRING COMMENT 'One-line summary for triage'
+  event_date            DATE   COMMENT 'Day of the bulk export (UTC)',
+  actor                 STRING COMMENT 'Principal that exported',
+  notebooks_exported    BIGINT COMMENT 'DISTINCT notebooks exported that day',
+  threshold_applied     DOUBLE COMMENT 'This principal own fence, or the flat fallback when it has no history',
+  iqrs_from_median      DOUBLE COMMENT 'How many IQRs above this principal normal day -- the anomaly magnitude',
+  baseline_median       DOUBLE COMMENT 'This principal usual daily count, for context',
+  formats_used          STRING COMMENT 'Export formats seen. SOURCE means raw code',
+  self_home_new_network BIGINT COMMENT 'Of those, notebooks from the principal OWN home exported from a new network',
+  source_ips            STRING COMMENT 'Source IPs of the counted exports',
+  analysis              STRING COMMENT 'One-line summary for triage'
 )
-COMMENT 'Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration, and it is deliberately NOT covered by the general download detection, which excludes SOURCE-format exports as normal development -- the exact format bulk code theft uses. Self-exports from a principal own home directory are excluded as platform tooling; first-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration.'
+COMMENT 'Bulk notebook export scored against each principal OWN history (Tukey fence: Q3 + multiplier * max(IQR, floor)), not a global threshold. The baseline comes from its own window of baseline_days ending baseline_exclude_days before start_time, so any search window works. MITRE T1567 Exfiltration Over Web Service, TA0010 Exfiltration. This is source-code / IP exfiltration. Self-exports from a principal own home directory are excluded as platform tooling UNLESS they come from a network the principal did not use in the baseline window and the IP is not Databricks platform egress (self_home_new_network counts those) -- a stolen token emptying its owner home. First-seen principals with no baseline are scored against a flat threshold so they are never invisible. Counts DISTINCT notebooks, so breadth of code taken rather than request volume. Use for: bulk notebook export, source code exfiltration, who exported many notebooks, exported other users notebooks, IP theft, someone downloading all our code, notebook export spike, mass export, code exfiltration, stolen token exporting a home folder.'
 RETURN
   -- The CTE chain is wrapped in a subquery deliberately. A SQL UDF body cannot
   -- begin with a top-level WITH: the CREATE fails with an opaque
@@ -386,28 +395,79 @@ RETURN
   -- number). Verified live -- the identical query runs standalone but the CREATE
   -- is rejected until the WITH sits inside SELECT * FROM ( ... ).
   SELECT * FROM (
-  WITH exports AS (
+  WITH platform_ips AS (
+    -- Platform egress: IPs Databricks itself authenticates from. An IP counts when it
+    -- carries a cluster-internal PAT or in-house OAuth token, or the in-house OAuth client
+    -- action (Apps, serverless) from a private address, or that action from a public address
+    -- at service volume: one principal at least 200 times in a day. A laptop calling a
+    -- Databricks App logs the same action from its own IP, far less often (at most 60 a
+    -- day on the reference workspace), so it stays in scope. Looks back 2 days before the
+    -- window so a short window still sees a full day of service traffic.
+    SELECT ip FROM (
+      SELECT regexp_replace(p.source_ip_address, ':[0-9]+$', '') AS ip, p.user_identity.email AS principal,
+             to_date(p.event_time) AS auth_day,
+             count_if(p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')) AS internal_auth,
+             count_if(p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication')) AS inhouse_auth
+      FROM system.access.audit AS p
+      WHERE p.event_time BETWEEN start_time - INTERVAL 2 DAYS AND end_time
+        AND (p.request_params['authenticationMethod'] IN ('API_INT_PAT_TOKEN', 'API_INHOUSE_OAUTH_TOKEN')
+             OR p.action_name IN ('workspaceInHouseOAuthClientAuthentication', 'accountInHouseOAuthClientAuthentication'))
+      GROUP BY regexp_replace(p.source_ip_address, ':[0-9]+$', ''), p.user_identity.email, to_date(p.event_time)
+    ) AS platform_days
+    GROUP BY ip
+    HAVING sum(internal_auth) > 0
+        OR (sum(inhouse_auth) > 0 AND ip RLIKE '^(10[.]|192[.]168[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|127[.])')
+        OR max(inhouse_auth) >= 200
+  ),
+  scan AS (
     SELECT
       to_date(a.event_time) AS event_date,
       a.user_identity.email AS actor,
       a.request_params['notebookFullPath'] AS notebook_path,
-      a.request_params['workspaceExportFormat'] AS export_format
+      a.request_params['workspaceExportFormat'] AS export_format,
+      regexp_replace(a.source_ip_address, ':[0-9]+$', '') AS ip,
+      COALESCE(NULLIF(regexp_extract(regexp_replace(a.source_ip_address, ':[0-9]+$', ''), '^([0-9]+[.][0-9]+[.][0-9]+)[.]', 1), ''),
+               regexp_replace(a.source_ip_address, ':[0-9]+$', '')) AS net,
+      contains(COALESCE(a.request_params['notebookFullPath'], ''), COALESCE(a.user_identity.email, ' ')) AS self_home
     FROM system.access.audit AS a
     WHERE a.action_name = 'workspaceExport'
       AND a.event_time BETWEEN start_time AND end_time
-      AND NOT contains(COALESCE(a.request_params['notebookFullPath'], ''),
-                       COALESCE(a.user_identity.email, ' '))
+  ),
+  seen_nets AS (
+    SELECT DISTINCT b.user_identity.email AS actor,
+      COALESCE(NULLIF(regexp_extract(regexp_replace(b.source_ip_address, ':[0-9]+$', ''), '^([0-9]+[.][0-9]+[.][0-9]+)[.]', 1), ''),
+               regexp_replace(b.source_ip_address, ':[0-9]+$', '')) AS net
+    FROM system.access.audit AS b
+    WHERE b.event_time >= timestampadd(DAY, -(baseline_exclude_days + baseline_days), start_time)
+      AND b.event_time <  timestampadd(DAY, -baseline_exclude_days, start_time)
+      AND b.user_identity.email IN (SELECT DISTINCT actor FROM scan)
+  ),
+  exports AS (
+    SELECT s.*,
+           (s.self_home AND n.net IS NULL AND pi.ip IS NULL) AS self_home_new_network
+    FROM scan AS s
+    LEFT JOIN seen_nets AS n ON s.actor = n.actor AND s.net = n.net
+    LEFT JOIN platform_ips AS pi ON s.ip = pi.ip
+    WHERE NOT s.self_home OR (n.net IS NULL AND pi.ip IS NULL)
   ),
   per_user_day AS (
     SELECT event_date, actor,
            COUNT(DISTINCT notebook_path) AS notebooks_exported,
-           CONCAT_WS('/', COLLECT_SET(export_format)) AS formats_used
+           COUNT(DISTINCT CASE WHEN self_home_new_network THEN notebook_path END) AS self_home_new_network,
+           CONCAT_WS('/', COLLECT_SET(export_format)) AS formats_used,
+           CONCAT_WS(', ', slice(array_sort(COLLECT_SET(ip)), 1, 10)) AS source_ips
     FROM exports
     GROUP BY event_date, actor
   ),
   baseline AS (
-    SELECT * FROM per_user_day
-    WHERE event_date < date_sub(current_date(), baseline_exclude_days)
+    SELECT to_date(b.event_time) AS event_date, b.user_identity.email AS actor,
+           COUNT(DISTINCT b.request_params['notebookFullPath']) AS notebooks_exported
+    FROM system.access.audit AS b
+    WHERE b.action_name = 'workspaceExport'
+      AND b.event_time >= timestampadd(DAY, -(baseline_exclude_days + baseline_days), start_time)
+      AND b.event_time <  timestampadd(DAY, -baseline_exclude_days, start_time)
+      AND NOT contains(COALESCE(b.request_params['notebookFullPath'], ''), COALESCE(b.user_identity.email, ' '))
+    GROUP BY to_date(b.event_time), b.user_identity.email
   ),
   per_user_threshold AS (
     SELECT
@@ -423,17 +483,24 @@ RETURN
     FROM baseline
     GROUP BY actor
   )
+  -- Every output column is named here, not only by the caller's column list: the Lakewatch
+  -- rule runtime drops a derived-table column list, so unnamed items would lose their names.
   SELECT
     d.event_date,
     d.actor,
     d.notebooks_exported,
-    ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1),
-    ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1),
-    ROUND(t.median, 1),
+    ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1) AS threshold_applied,
+    ROUND((d.notebooks_exported - t.median) / NULLIF(t.iqr, 0), 1) AS iqrs_from_median,
+    ROUND(t.median, 1) AS baseline_median,
     d.formats_used,
+    d.self_home_new_network,
+    d.source_ips,
     CONCAT(CAST(d.notebooks_exported AS STRING), ' notebooks exported (threshold ',
            CAST(ROUND(COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE)), 1) AS STRING),
-           ', formats: ', d.formats_used, ')')
+           ', formats: ', d.formats_used,
+           CASE WHEN d.self_home_new_network > 0
+                THEN CONCAT(', ', CAST(d.self_home_new_network AS STRING), ' from own home on a new network') ELSE '' END,
+           ')') AS analysis
   FROM per_user_day AS d
   LEFT JOIN per_user_threshold AS t ON d.actor = t.actor
   WHERE d.notebooks_exported >= COALESCE(t.user_threshold, CAST(no_baseline_threshold AS DOUBLE))
