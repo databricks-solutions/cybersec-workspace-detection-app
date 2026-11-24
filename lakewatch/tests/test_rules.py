@@ -141,8 +141,9 @@ def test_deduplication_window_uses_interval_strings():
     assert not bad, bad
 
 
-# Alert summaries name the entity only. Lakewatch groups signals into one alert by summary text, so a count or other
-# per-run value in the summary opens a new alert on every run. Counts belong in output.context.
+# Alert summaries name the entity only. Lakewatch collates signals into an open alert by (rule, version, summary) within
+# the findings collation window, so a count or other per-run value in the summary keeps repeat signals for the same
+# entity out of one alert. Counts belong in output.context.
 SUMMARY_TOKENS = {
     "actor", "actor_kind", "src_ip", "source_ip", "action", "kind", "technique", "reason", "change_kind", "securable",
     "target", "target_user", "target_kind", "client", "credential_type", "net24", "ua_family", "user_agent",
